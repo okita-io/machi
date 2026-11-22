@@ -8,13 +8,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from machi.clients import synthesize, transcribe
 from machi.config import settings
 from machi.db import init_db, record_attempt, record_session
+from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
 from machi.llm import LlmClient
 from machi.nlp import build_ruby_html, to_romaji
 from machi.scenario_loader import load_all_scenarios
@@ -115,17 +116,27 @@ async def create_session(body: CreateSessionRequest) -> dict[str, Any]:
 
 
 @app.post("/sessions/{session_id}/turn")
-async def session_turn(session_id: str, body: TurnRequest) -> dict[str, Any]:
+async def session_turn(
+    session_id: str,
+    body: TurnRequest,
+    response: Response,
+) -> dict[str, Any]:
     state = SESSIONS.get(session_id)
     if not state:
         raise HTTPException(status_code=404, detail="session not found")
 
+    timer = TurnLatency()
     utterance = body.text or ""
     if body.audio_b64 and not utterance:
         audio = base64.b64decode(body.audio_b64)
-        utterance = await transcribe(audio_pcm=audio)
+        with timer.measure(STAGE_ASR):
+            utterance = await transcribe(audio_pcm=audio)
     elif not utterance:
-        utterance = await transcribe(text_override="")
+        with timer.measure(STAGE_ASR):
+            utterance = await transcribe(text_override="")
+    else:
+        # Typed text does not call ASR. Omit a zero duration.
+        timer.skip(STAGE_ASR)
 
     prev_node_id = state.node_id
     goal_hits, success = evaluate_turn(state, utterance)
@@ -147,8 +158,6 @@ async def session_turn(session_id: str, body: TurnRequest) -> dict[str, Any]:
 
     npc_system = f"You are {state.scenario.npc.role}. Speak only Japanese, one short line."
     npc_user = f"Learner said: {utterance}. Respond in character."
-    npc_ja = await LLM.npc_reply(system=npc_system, user=npc_user, fallback_line=npc_ja)
-
     coach = default_tutor_payload(
         goal_hits,
         coach_note="Good try! Match a key phrase from the briefing." if not success else "Nice!",
@@ -156,9 +165,15 @@ async def session_turn(session_id: str, body: TurnRequest) -> dict[str, Any]:
     )
     tutor_system = "You are Sora the tutor. Return JSON with goal_hits, coach_note_en, hint_rung."
     tutor_user = f"Utterance: {utterance}; hits: {goal_hits}"
-    coach = await LLM.tutor_json(system=tutor_system, user=tutor_user, fallback=coach)
+    with timer.measure(STAGE_LLM):
+        npc_ja = await LLM.npc_reply(system=npc_system, user=npc_user, fallback_line=npc_ja)
+        coach = await LLM.tutor_json(system=tutor_system, user=tutor_user, fallback=coach)
 
-    audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
+    with timer.measure(STAGE_TTS):
+        audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
+    for key, value in timer.header_map().items():
+        response.headers[key] = value
+    timer.emit(session_id=session_id)
     record_attempt(
         Path(settings.db_path),
         session_id,
@@ -201,7 +216,7 @@ async def ws_session(websocket: WebSocket, session_id: str) -> None:
                     text=data.get("text"),
                     audio_b64=data.get("audio_b64"),
                 )
-                result = await session_turn(session_id, req)
+                result = await session_turn(session_id, req, Response())
                 await websocket.send_json({"type": "turn_result", **result})
     except WebSocketDisconnect:
         return

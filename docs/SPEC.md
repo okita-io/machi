@@ -95,6 +95,8 @@ flowchart LR
 
 WebSocket carries 16 kHz PCM frames on LAN (push-to-talk fallback for v1).
 
+Each turn logs one JSON line (`event: turn_latency`) with `stages_ms` for ASR, LLM, and TTS. HTTP `POST /sessions/{id}/turn` also sets `X-Latency-ASR`, `X-Latency-LLM`, and `X-Latency-TTS` (milliseconds). A stage that did not run — typed text skips ASR — is `null` in the log and its header is omitted.
+
 ## Docker profiles
 
 | Profile | Use |

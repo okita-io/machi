@@ -97,6 +97,10 @@ pip install -e "./orchestrator[smart-turn]"
 
 Push-to-talk bypasses Smart Turn as well. A hold from the model still cannot outlast the 500 ms silence ceiling.
 
+### Barge-in
+
+Pressing talk (or starting a hands-free capture) stops NPC audio in the browser immediately. The same `audio_start` — and any new `turn` — cancels that session's in-flight server turn. ASR, LLM, and TTS awaits are aborted, the cancelled result is dropped, and scenario progress from that turn is rolled back. The latency log still records the turn with `"cancelled": true`. A turn that already delivered `turn_result` is left as-is; only playback stops.
+
 ## Repository layout
 
 ```
@@ -122,6 +126,7 @@ docker-compose.yml
 | Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks and waits for `turn` |
 | Turn pipeline | Audio-only `audio_b64` (REST or WebSocket) runs ASR → LLM → TTS. Typed text skips ASR |
 | Hands-free | Silero VAD + silence heuristic (500 ms ceiling). Smart Turn v3 optional |
+| Barge-in | New capture stops playback; `audio_start` or `turn` cancels the in-flight server turn |
 | ASR / TTS (CPU) | Mock / stub WAV |
 | ASR / TTS / pron (GPU) | Health stubs |
 | LLM | Live when `LLM_BASE_URL` set; else mock |

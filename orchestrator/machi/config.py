@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     assets_base_url: str = "http://assets:8080"
     # Directory with baked NPC audio under audio/{scenario_id}/. Empty disables the cache.
     assets_path: str = "/assets"
+    # voices/voices.yaml. Docker mounts this at /voices; tests fall back to the repo file.
+    voices_path: str = "/voices/voices.yaml"
+    # Empty keeps each voice's first engine. cpu/stub, spark, or rtx3090 filters the chain.
+    speech_profile: str = ""
 
     # Hands-free only. Push-to-talk does not read these.
     vad_enabled: bool = True

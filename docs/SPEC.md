@@ -135,9 +135,13 @@ Time is from the learner stopping to the first NPC audio. The M0 gate is under 2
 
 | Profile | Use |
 | --- | --- |
-| `spark` | DGX Spark aarch64, Qwen ASR/TTS stack |
-| `rtx3090` | x86 speech on 3090; LLM remote via env |
+| `spark` | DGX Spark aarch64. Speech runs here only when the 3090 is absent |
+| `rtx3090` | Default speech host (x86). LLM stays remote via env |
 | `cpu` | Demo/dev: lightweight stubs, no large model downloads |
+
+When both GPUs are up, ASR and TTS stay on the 3090 so Spark can serve the LLM and ComfyUI. See [ADR-001](ADR-001-speech-placement.md). Knobs: `GPU_MEM_FRACTION`, `ASR_ENGINE`, `GPU_BASE`, `SPEECH_PROFILE`.
+
+Sora and NPC voices resolve through `voices/voices.yaml` (Irodori v4.1 Small, then Kokoro, then stub for Sora; Qwen3-TTS `Ono_Anna` for each NPC). The web shows Sora's seven expression plates and stacks the scene, subtitles, and controls in a 9:16 crop at viewport widths of 480px and below.
 
 See `docker-compose.yml` and `.env.example`.
 

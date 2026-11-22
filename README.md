@@ -46,15 +46,17 @@ When `LLM_BASE_URL` is empty, the orchestrator uses deterministic scenario lines
 
 ### GPU profiles
 
-```bash
-# DGX Spark (aarch64) — set GPU_BASE in .env.spark
-docker compose --env-file .env.spark --profile spark up
+Speech placement is [docs/ADR-001-speech-placement.md](docs/ADR-001-speech-placement.md). With both machines up, run ASR/TTS on the **RTX 3090** and leave Spark for the LLM and ComfyUI (`:8188`). Start Spark speech only when the 3090 is absent. Do not leave those speech containers running on Spark beside the LLM.
 
-# Desktop RTX 3090 (x86) — ASR_ENGINE=kotoba-whisper-faster
+```bash
+# Desktop RTX 3090 (x86) — default speech host. ASR_ENGINE=kotoba-whisper-faster is x86 only.
 docker compose --env-file .env.rtx3090 --profile rtx3090 up
+
+# DGX Spark (aarch64) — set GPU_BASE in .env.spark. Speech here only if the 3090 is down.
+docker compose --env-file .env.spark --profile spark up
 ```
 
-GPU services are **stubbed** in this scaffold; wire Qwen3-ASR / TTS per `docs/SPEC.md`.
+`GPU_MEM_FRACTION` (default 0.40, use ≤ 0.35 on Spark), `ASR_ENGINE`, and `GPU_BASE` are the speech knobs. `SPEECH_PROFILE` selects a row in `voices/voices.yaml`. GPU services are **stubbed** in this scaffold; wire Qwen3-ASR / TTS per `docs/SPEC.md`.
 
 ## Development without Docker
 

@@ -69,6 +69,7 @@ from machi.turn_taking import (
     build_turn_gate,
     hands_free_turn_taking,
 )
+from machi.voices import resolve_voice
 from machi.ws_audio import PCM_FRAME_BYTES, SessionAudioBuffer
 
 logger = logging.getLogger(__name__)
@@ -236,12 +237,13 @@ async def create_session(body: CreateSessionRequest) -> dict[str, Any]:
 async def synthesize_line(body: SynthesizeRequest) -> dict[str, str]:
     """Browser tap-to-hear. Proxies the configured TTS stub (``POST /v1/synthesize``)."""
     try:
-        audio = await synthesize(body.text, voice=body.voice)
+        voice = resolve_voice(body.voice)
+        audio = await synthesize(body.text, voice=voice)
     except SpeechError as exc:
         raise _speech_unavailable(exc) from exc
     return {
         "text": body.text,
-        "voice": body.voice,
+        "voice": voice,
         "audio_b64": base64.b64encode(audio).decode("ascii"),
         "format": "wav",
     }
@@ -515,7 +517,9 @@ async def _session_turn_pipeline(
                     audio = cached
                 else:
                     timer.set_source(STAGE_TTS, "live")
-                    audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
+                    audio = await synthesize(
+                        npc_ja, voice=resolve_voice(state.scenario.npc.id)
+                    )
         except SpeechError as exc:
             raise _speech_unavailable(exc) from exc
         # Let a tutor call that already finished publish before we decide.

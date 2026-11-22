@@ -189,6 +189,12 @@ Each WAV is posted to `{ASR_URL}/v1/transcribe`. The score is word error rate on
 TTS_URL=http://127.0.0.1:8102 python scripts/bake_npc_audio.py
 ```
 
+### Scenarios
+
+Each visit is a YAML file under `scenarios/`. The orchestrator walks `flow.nodes` from the learner's lines: a goal's `accept` list (kana, kanji, or romaji) advances `on_success` or `next`. The web turn UI does not special-case branches.
+
+A node with `kind: branch` is silent. It has `condition.level_gte` and two targets, `high` and `low`. The session's learner level (1–4) decides: level at or above the gate takes `high`, a lower level takes `low`, in the same turn. In the ramen shop, ordering at level 3 or 4 asks 硬め・普通・やわらかめ (`かため` / `ふつう` / `やわらかめ`, also `katame`, `futsuu`, `yawarakame`). Level 1 or 2 skips that question and confirms the order. A wrong firmness stays on the node; Sora's coach note tells you the three words. The firmness goal is optional, so a low-level visit still completes with party size, order, and payment.
+
 ### Scenario editor
 
 Open `#/editor` in the web UI. The page lists `GET /scenarios`, loads a file with `GET /scenarios/{id}/raw`, and checks a draft with `POST /scenarios/validate`. Validation uses the same YAML loader and Pydantic models as the orchestrator (unknown fields and missing flow edges come back with a path and, when the parser can see it, a line). The endpoint does not write disk. **Export .yaml** downloads a blob and stays disabled until the current text validates.
@@ -225,7 +231,7 @@ docker-compose.yml
 | Component | Status |
 | --- | --- |
 | Scenario schema + restaurant YAML | Real |
-| Flow / goal matching | Real |
+| Flow / goal matching | Real. `kind: branch` nodes follow `high` when the learner level is at least `condition.level_gte`, and `low` otherwise. Ramen asks noodle firmness at level 3+ |
 | SQLite session logging | Real. Debrief writes stars, completion, per-goal hint peaks, and weighted correction cards. Completing a scenario adds those cards to the FSRS deck. `GET /sessions/{id}/progress` reads the summary back |
 | Romaji (cutlet) | Real for NPC and learner lines. The web UI shows the romaji row when the hint level is 2 or higher (selector defaults to 2) |
 | Furigana | Per-token ruby from fugashi + unidic-lite for any line. Scenario `npc_kana` overrides that reading when the spoken line still matches the script |

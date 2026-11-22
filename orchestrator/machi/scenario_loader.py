@@ -94,6 +94,10 @@ def _outgoing(node: FlowNode) -> list[tuple[str, str, tuple[Any, ...]]]:
             edges.append((f"on_success.{key}", dest, ("on_success", key)))
     if node.next:
         edges.append(("next", node.next, ("next",)))
+    if node.high:
+        edges.append(("high", node.high, ("high",)))
+    if node.low:
+        edges.append(("low", node.low, ("low",)))
     return edges
 
 
@@ -114,7 +118,7 @@ def _graph_issues(spec: ScenarioSpec, lines: dict[tuple[Any, ...], int]) -> list
             issues.append(
                 _issue(
                     f"flow.nodes.{node_id}",
-                    f"node {node_id!r} is missing an outgoing edge (on_success or next)",
+                    f"node {node_id!r} is missing an outgoing edge",
                     _line_for(lines, ("flow", "nodes", node_id)),
                 )
             )

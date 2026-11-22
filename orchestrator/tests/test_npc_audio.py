@@ -27,7 +27,12 @@ settings.db_path = str(ROOT / "data" / "test_machi.sqlite")
 
 def test_restaurant_fixed_lines_are_npc_fields_only():
     lines = fixed_npc_lines(SCENARIO)
-    assert [node_id for node_id, _text in lines] == ["greet", "seat", "confirm_order"]
+    assert [node_id for node_id, _text in lines] == [
+        "greet",
+        "seat",
+        "noodle_firmness",
+        "confirm_order",
+    ]
     assert "ありがとうございました！" not in {text for _node, text in lines}
 
 

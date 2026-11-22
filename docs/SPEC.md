@@ -149,6 +149,8 @@ See `docker-compose.yml` and `.env.example`.
 
 One YAML file per scenario under `scenarios/`. See `scenarios/restaurant_ramen_01.yaml` for the reference restaurant MVP.
 
+A flow node with `kind: branch` is not spoken. It carries `condition.level_gte` (an integer from 1 to 4) and two targets, `high` and `low`. When the engine enters that node it compares the session's learner level: `level >= level_gte` follows `high`, otherwise `low`. The choice is resolved before the turn's NPC line is chosen, so the client still sees one ordinary turn. The ramen shop uses this on the order: levels 3 and 4 are asked 硬め・普通・やわらかめ (`noodle_firmness`, accepted as かため / ふつう / やわらかめ and romaji such as katame, futsuu, yawarakame). Levels 1 and 2 take `low` and go straight to the order confirmation. A miss stays on the firmness node and Sora's retry note is that goal's `coach_en`.
+
 `POST /scenarios/validate` runs that YAML through the same loader and Pydantic models and returns structured errors (path, message, line when the parser has one). It does not write a file. `GET /scenarios/{id}/raw` returns the on-disk text. The browser editor is `#/editor`: validate, then export a `.yaml` blob once the draft is valid.
 
 Scene plates are baked offline with `tools/comfyui_bake.py` (ComfyUI Qwen Image 2511, WebP into `assets/`). That script is not part of `docker compose up` and must not restart ComfyUI. A real run requires `COMFY_BAKE_GO=1`.

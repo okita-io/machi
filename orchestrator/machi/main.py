@@ -668,9 +668,16 @@ async def _session_turn_pipeline(
         {"node_id": prev_node_id, "utterance": utterance, "scripted_line": scripted_ja},
     )
     note_name = "coach_note_success.md" if success else "coach_note_retry.md"
+    coach_note = render_prompt(note_name, {})
+    if not success:
+        for goal_id in expected_ids:
+            goal = state.scenario.goal_by_id(goal_id)
+            if goal is not None and goal.coach_en:
+                coach_note = goal.coach_en
+                break
     coach_fallback = default_tutor_payload(
         goal_hits,
-        coach_note=render_prompt(note_name, {}),
+        coach_note=coach_note,
         hint_rung=state.hint_rung,
     )
     tutor_system = render_prompt("tutor_system.md", {})

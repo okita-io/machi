@@ -40,6 +40,10 @@ def _edge_targets(node: FlowNode) -> list[str]:
         targets.extend(node.on_success.values())
     if node.next:
         targets.append(node.next)
+    if node.high:
+        targets.append(node.high)
+    if node.low:
+        targets.append(node.low)
     return targets
 
 
@@ -140,6 +144,24 @@ def test_scenario_yaml_invariants(path: Path):
 
     if spec.id == "coin_laundry_01":
         assert len(spec.scene.hotspots) >= 3
+
+
+def test_branch_edges_exist():
+    """A kind:branch node names two real targets and a level_gte gate."""
+    spec = load_scenario(RESTAURANT)
+    nodes = spec.flow.nodes
+    branches = [(node_id, node) for node_id, node in nodes.items() if node.kind == "branch"]
+    assert branches, "restaurant scenario needs a level curveball"
+    for node_id, node in branches:
+        assert node.condition is not None
+        assert 1 <= node.condition.level_gte <= 4
+        assert node.high in nodes, f"{node_id} high"
+        assert node.low in nodes, f"{node_id} low"
+        assert node.high != node.low
+    gate = nodes["order_curveball"]
+    assert gate.condition is not None and gate.condition.level_gte == 3
+    assert gate.high == "noodle_firmness"
+    assert gate.low == "confirm_order"
 
 
 def test_rejects_empty_levels():

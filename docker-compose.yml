@@ -15,6 +15,7 @@ x-gpu: &gpu
 
 services:
   web:
+    image: machi-web:local
     build: ./web
     profiles: [cpu, spark, rtx3090]
     ports:
@@ -23,6 +24,25 @@ services:
       - orchestrator
     environment:
       VITE_API_BASE: /api
+
+  # Opt-in LAN HTTPS for the phone mic. Plain HTTP stays on `web` :5173.
+  # This service sets HTTPS=1 and listens on :5174. It is not in the cpu/spark/rtx3090
+  # profiles, so `docker compose --profile cpu up` does not publish it.
+  #   ./scripts/make_lan_https.sh
+  #   docker compose --profile cpu --profile https up
+  # Local vite (no Docker): HTTPS=1 npm run dev   # https://<lan-ip>:5174
+  web-https:
+    image: machi-web:local
+    build: ./web
+    profiles: [https]
+    ports:
+      - "5174:5174"
+    depends_on:
+      - orchestrator
+    environment:
+      HTTPS: "1"
+    volumes:
+      - ./.certs:/etc/nginx/certs:ro
 
   orchestrator:
     build: ./orchestrator

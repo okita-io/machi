@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+_FORBID = ConfigDict(extra="forbid")
 
 
 class LocalizedTitle(BaseModel):
+    model_config = _FORBID
     en: str
     ja: str
 
 
 class Hotspot(BaseModel):
+    model_config = _FORBID
     rect: tuple[int, int, int, int]
     ja: str
     kana: str
@@ -24,6 +28,7 @@ class Hotspot(BaseModel):
 
 
 class SceneSpec(BaseModel):
+    model_config = _FORBID
     background: str
     # Resting Sora plate. The web swaps sprites/sora/{expression}.webp from this path.
     sprite: str = "sprites/sora/neutral.webp"
@@ -34,6 +39,7 @@ class SceneSpec(BaseModel):
 
 
 class VoiceSpec(BaseModel):
+    model_config = _FORBID
     engine: str
     speaker: str | None = None
     style: str | None = None
@@ -41,6 +47,7 @@ class VoiceSpec(BaseModel):
 
 
 class NpcSpec(BaseModel):
+    model_config = _FORBID
     id: str
     role: str
     voice: VoiceSpec
@@ -49,6 +56,7 @@ class NpcSpec(BaseModel):
 
 
 class GuideSpec(BaseModel):
+    model_config = _FORBID
     id: str
     voice: VoiceSpec
     brief_en: str | None = None
@@ -56,6 +64,7 @@ class GuideSpec(BaseModel):
 
 
 class GoalSpec(BaseModel):
+    model_config = _FORBID
     id: str
     prompt_en: str
     accept: list[str] = Field(default_factory=list)
@@ -66,6 +75,7 @@ class GoalSpec(BaseModel):
 
 
 class KeyPhrase(BaseModel):
+    model_config = _FORBID
     ja: str
     kana: str
     romaji: str
@@ -73,16 +83,19 @@ class KeyPhrase(BaseModel):
 
 
 class FlowOther(BaseModel):
+    model_config = _FORBID
     clarify: str
     max_retries: int = 2
 
 
 class FlowBranch(BaseModel):
+    model_config = _FORBID
     when: dict[str, int] | None = None
     surprise: str | None = None
 
 
 class FlowNode(BaseModel):
+    model_config = _FORBID
     npc: str | None = None
     npc_kana: str | None = None
     expects: str | list[str] | None = None
@@ -98,11 +111,13 @@ class FlowNode(BaseModel):
 
 
 class FlowSpec(BaseModel):
+    model_config = _FORBID
     start: str
     nodes: dict[str, FlowNode]
 
 
 class SuccessSpec(BaseModel):
+    model_config = _FORBID
     required: list[str]
     stars: dict[int, str] = Field(default_factory=dict)
 
@@ -112,6 +127,7 @@ HINT_DEFAULTS: dict[int, str] = {1: "english", 2: "romaji", 3: "kana", 4: "none"
 
 
 class ScenarioSpec(BaseModel):
+    model_config = _FORBID
     id: str
     title: LocalizedTitle
     level: list[int]

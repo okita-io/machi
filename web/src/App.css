@@ -532,6 +532,69 @@ header h1 {
   color: #fff;
 }
 
+.editor-layout {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.editor-actions select,
+.editor-layout textarea {
+  background: #0f1118;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+
+.editor-actions select {
+  margin-left: 0.4rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.editor-actions button {
+  background: #5c7cfa;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4rem 0.8rem;
+}
+
+.editor-actions button:disabled {
+  opacity: 0.45;
+}
+
+.editor-layout textarea {
+  width: 100%;
+  min-height: 24rem;
+  padding: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.editor-status[data-status="valid"] {
+  color: #8ce99a;
+}
+
+.editor-status[data-status="invalid"] {
+  color: #ffb4b4;
+}
+
+.editor-errors {
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #ffb4b4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+}
+
 /* Phone: 480px matches PHONE_MAX_WIDTH_PX in useViewport.ts. */
 @media (max-width: 480px) {
   .app {

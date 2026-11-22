@@ -211,7 +211,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M4-01 | [ ] | Level 3/4 curveballs (`flow.branch` when `level_gte`) | M1-11 | Restaurant firmness question at L3+ |
 | M4-02 | [x] | Sora expression set (6–8) + per-NPC voice map | M1-07, M1-05 | `voices/voices.yaml` complete |
 | M4-03 | [x] | Phone layout (9:16 crop) | M1-07 | Responsive CSS; playable on mobile browser |
-| M4-04 | [ ] | HTTPS for LAN (self-signed or Tailscale) | M0-01 | Mic works on phone; documented in README |
+| M4-04 | [x] | HTTPS for LAN (self-signed or Tailscale) | M0-01 | Mic works on phone; documented in README |
 | M4-05 | [ ] | **Kokoro-82M** CPU fallback in `speech-cpu` or `tts` | M0-10 | `cpu` profile optional real TTS without GPU |
 
 ---
@@ -221,8 +221,8 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
 | M5-01 | [ ] | Offline Omni judge on recorded attempts (not live loop) | — | Behind `RESEARCH_OMNI=1`; NC models not in default image |
-| M5-02 | [ ] | Scenario editor (YAML + validate in browser) | S0-02 | Export valid scenario file |
-| M5-03 | [ ] | ComfyUI bake script (never in `compose up`) | M1-07 | One-shot generates assets to `assets/` |
+| M5-02 | [x] | Scenario editor (YAML + validate in browser) | S0-02 | Export valid scenario file |
+| M5-03 | [x] | ComfyUI bake script (never in `compose up`) | M1-07 | One-shot generates assets to `assets/` |
 
 ---
 
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M2-07 (spoken review sessions), M3-07 (cross-scenario SRS weaving), M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._
+_Last updated with M4-04 (LAN HTTPS), M5-02 (scenario editor), M5-03 (offline ComfyUI bake), M2-07 (spoken review sessions), M3-07 (cross-scenario SRS weaving), M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._

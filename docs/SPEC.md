@@ -109,7 +109,7 @@ WebSocket carries 16 kHz PCM frames on LAN (push-to-talk fallback for v1).
 
 The browser captures mono audio with an AudioWorklet and sends **20 ms** Int16 frames (640 bytes) as binary WebSocket messages. JSON control events are `audio_start` (optional `hands_free`), `audio_stop`, and `turn`. The server replies with JSON only, including `{type: "audio_ack", frames: N}`. A `turn` without `text` runs the existing turn pipeline on PCM accumulated for that socket (`audio_b64`). A `turn` with `text` stays on the typed path. `npm run dev` logs each frame; set `VITE_LOG_PCM_FRAMES=0` to silence that.
 
-Push-to-talk (`hands_free` false) does not run VAD or the turn scorer. The client ends the utterance with `turn`. Hands-free runs Silero VAD on each frame. After speech, a silence candidate (target 250 ms) is passed to the turn scorer. The default scorer is a silence-duration heuristic (no download). Optional Smart Turn v3 can cut earlier. Trailing silence still forces a cut at the **500 ms** ceiling, and the server emits `turn_result` on that cut. Microphone capture requires localhost or HTTPS.
+Push-to-talk (`hands_free` false) does not run VAD or the turn scorer. The client ends the utterance with `turn`. Hands-free runs Silero VAD on each frame. After speech, a silence candidate (target 250 ms) is passed to the turn scorer. The default scorer is a silence-duration heuristic (no download). Optional Smart Turn v3 can cut earlier. Trailing silence still forces a cut at the **500 ms** ceiling, and the server emits `turn_result` on that cut. Microphone capture requires a secure context: localhost or HTTPS. A LAN IP on plain HTTP is not enough. `scripts/make_lan_https.sh` writes a self-signed certificate (SAN for the LAN IP, optional Tailscale IP, and localhost) under `.certs/`. Compose profile `https` serves it on port 5174 (`HTTPS=1`); port 5173 stays HTTP. The browser then uses `wss://` for `/api/ws`.
 
 `POST /sessions/{id}/turn` accepts `{ "audio_b64": "<pcm>" }` with no `text`. The orchestrator decodes that PCM, transcribes it at `ASR_URL` (`POST /v1/transcribe`), runs the NPC and tutor LLM calls on the transcript, then synthesizes the NPC line at `TTS_URL`. The JSON response includes `learner_text`, `npc.ja`, `npc.romaji`, and `tts_audio_b64`. A WebSocket `turn` that carries only `audio_b64` (or buffered PCM and no `text`) uses the same pipeline. Typed `text` still skips ASR. Blank `text` does not count as a typed turn.
 
@@ -148,6 +148,10 @@ See `docker-compose.yml` and `.env.example`.
 ## Scenario data format
 
 One YAML file per scenario under `scenarios/`. See `scenarios/restaurant_ramen_01.yaml` for the reference restaurant MVP.
+
+`POST /scenarios/validate` runs that YAML through the same loader and Pydantic models and returns structured errors (path, message, line when the parser has one). It does not write a file. `GET /scenarios/{id}/raw` returns the on-disk text. The browser editor is `#/editor`: validate, then export a `.yaml` blob once the draft is valid.
+
+Scene plates are baked offline with `tools/comfyui_bake.py` (ComfyUI Qwen Image 2511, WebP into `assets/`). That script is not part of `docker compose up` and must not restart ComfyUI. A real run requires `COMFY_BAKE_GO=1`.
 
 ## Prompt design
 

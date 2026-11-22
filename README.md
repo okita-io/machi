@@ -77,6 +77,35 @@ cd web && npm install && npm run dev
 
 The dev UI logs each captured PCM frame in the browser console. Set `VITE_LOG_PCM_FRAMES=0` to turn that off. Production builds do not log frames. The mic works on localhost or HTTPS.
 
+### Phone mic on the LAN (HTTPS)
+
+`getUserMedia` only runs in a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts): `localhost`, or HTTPS. Opening `http://192.168.x.x:5173` on a phone leaves the mic blocked. Port **5173 stays plain HTTP** for the laptop demo. HTTPS is opt-in on **5174**.
+
+```bash
+./scripts/make_lan_https.sh
+# optional: ./scripts/make_lan_https.sh --lan 192.168.1.20 --tailscale 100.x.y.z
+docker compose --profile cpu --profile https up
+```
+
+The script writes a 100-year self-signed certificate to `.certs/` (gitignored) with SAN entries for localhost, the LAN IP, and a Tailscale IPv4 when `tailscale ip -4` works. `web-https` (profile `https`) sets `HTTPS=1` and nginx serves that certificate on `:5174`, proxying `/api` and the WebSocket the same way `:5173` does. The page is `https://`, so the browser opens `wss://` to `/api/ws/...`. Without Docker: `cd web && HTTPS=1 npm run dev` (same cert files, port 5174).
+
+Trust the certificate, then open `https://<lan-ip>:5174`.
+
+**iOS**
+
+1. AirDrop `.certs/machi.crt` and open it.
+2. Settings → General → VPN & Device Management (or Settings → Profile Downloaded) → Install the profile.
+3. Settings → General → About → Certificate Trust Settings → enable full trust for **machi-lan**.
+4. Safari → `https://<lan-ip>:5174` → allow the microphone.
+
+**Android**
+
+1. Copy `machi.crt` to the phone.
+2. Settings → Security → Encryption & credentials → Install a certificate → **CA certificate**.
+3. Chrome → `https://<lan-ip>:5174` → allow the microphone. Chrome uses the user CA store. Some in-app WebViews ignore it.
+
+**Tailscale.** If the cert includes the tailnet IP, open `https://<tailscale-ip>:5174` from a phone on the same tailnet after the trust steps above. For a real name and no manual install, run `tailscale serve` on the Machi host in front of port 5173. That proxy is not part of Compose.
+
 ### Hands-free turn taking
 
 Push-to-talk (`hands_free: false`) never runs VAD or a turn scorer. Release the button; the client sends `turn`.
@@ -160,6 +189,23 @@ Each WAV is posted to `{ASR_URL}/v1/transcribe`. The score is word error rate on
 TTS_URL=http://127.0.0.1:8102 python scripts/bake_npc_audio.py
 ```
 
+### Scenario editor
+
+Open `#/editor` in the web UI. The page lists `GET /scenarios`, loads a file with `GET /scenarios/{id}/raw`, and checks a draft with `POST /scenarios/validate`. Validation uses the same YAML loader and Pydantic models as the orchestrator (unknown fields and missing flow edges come back with a path and, when the parser can see it, a line). The endpoint does not write disk. **Export .yaml** downloads a blob and stays disabled until the current text validates.
+
+### ComfyUI scene bake (offline)
+
+`tools/comfyui_bake.py` is a one-shot. It is **never** part of `docker compose up`. House rule: do not restart ComfyUI (April shares that process). The script only queues a prompt. It refuses to open a socket unless `COMFY_BAKE_GO=1`. `--dry-run` prints the workflow and does not use the network.
+
+```bash
+COMFY_BAKE_GO=1 python tools/comfyui_bake.py \
+  --prompt "ramen counter, evening" --out assets/bg/ramen.webp
+# edit pass: --ref path/to/plate.png
+# --server defaults to http://100.69.65.33:8188
+```
+
+Templates live in `tools/workflows/` (`qwen_image_2511_t2i.json`, `qwen_image_2511_edit.json`): UNETLoader `qwen_image_edit_2511_bf16` at `fp8_e4m3fn`, CLIPLoader `qwen_2.5_vl_7b_fp8_scaled` type `qwen_image`, VAELoader `qwen_image_vae`, euler / simple / cfg 4.0. Output is WebP via Pillow, which is not a Compose dependency.
+
 ## Repository layout
 
 ```
@@ -200,7 +246,7 @@ docker-compose.yml
 1. **M0** — Stream a real ASR (`asr/`) on the PCM the VAD already commits.
 2. **GPU ASR/TTS** — Implement `asr` and `tts` services with Qwen3 or Kokoro on the `cpu`/`spark` profiles.
 3. **M1** — Prompt templates and tutor JSON validation are in. Briefing, warm-up, and the debrief screen run for the ramen shop. Furigana and the level-2 romaji row are in place.
-4. **Assets** — ComfyUI bake script for WebP backgrounds and Sora expression sheet.
+4. **Assets** — `tools/comfyui_bake.py` queues Qwen Image 2511 on a running ComfyUI and writes WebP under `assets/`. It is not part of Compose, and it must not restart ComfyUI.
 
 ## License
 

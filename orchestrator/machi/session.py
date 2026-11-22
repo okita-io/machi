@@ -14,6 +14,15 @@ PHASE_WARMUP = "warmup"
 PHASE_ROLEPLAY = "roleplay"
 PHASE_DEBRIEF = "debrief"
 
+# Due review phrases appended to a visit. Scenario key phrases stay card-free.
+WEAVE_LIMIT = 2
+
+
+@dataclass
+class WarmupStep:
+    phrase: KeyPhrase
+    card_id: int | None = None
+
 
 @dataclass
 class SessionState:
@@ -28,6 +37,7 @@ class SessionState:
     warmup_index: int = 0
     corrections: list[dict[str, Any]] = field(default_factory=list)
     hint_peaks: dict[str, int] = field(default_factory=dict)
+    warmup_steps: list[WarmupStep] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.node_id:
@@ -177,35 +187,74 @@ def _phrase_accept(phrase: KeyPhrase) -> list[str]:
     return [part for part in (phrase.ja, phrase.kana, phrase.romaji, phrase.en) if part]
 
 
+def warmup_queue(state: SessionState) -> list[WarmupStep]:
+    """Scenario phrases, then up to two due review phrases when the session wove them."""
+    if state.warmup_steps:
+        return state.warmup_steps
+    return [WarmupStep(phrase=phrase) for phrase in state.scenario.key_phrases]
+
+
+def key_phrase_for_card(card: dict[str, Any]) -> KeyPhrase:
+    """Warm-up line for one due card. Japanese is the line the learner says."""
+    ja = str(card.get("correction_ja") or "").strip()
+    en = str(card.get("correction_en") or "").strip()
+    romaji = str(card.get("romaji") or "").strip()
+    if not ja:
+        ja = en or romaji or "…"
+    return KeyPhrase(ja=ja, kana=ja, romaji=romaji, en=en or ja)
+
+
+def reviews_briefing_line(phrases: list[KeyPhrase]) -> str:
+    """Sora's briefing line. Empty when this visit has nothing due to weave in."""
+    shown = phrases[:WEAVE_LIMIT]
+    if not shown:
+        return ""
+    parts: list[str] = []
+    for phrase in shown:
+        if phrase.en and phrase.en != phrase.ja:
+            parts.append(f"{phrase.ja} ({phrase.en})")
+        else:
+            parts.append(phrase.ja)
+    return "From your reviews: " + "; ".join(parts)
+
+
 def begin_warmup(state: SessionState) -> KeyPhrase | None:
-    """Enter warm-up on the first key phrase. No phrases skips straight to role-play."""
+    """Enter warm-up on the first phrase. No phrases skips straight to role-play."""
     state.warmup_index = 0
-    phrases = state.scenario.key_phrases
-    if not phrases:
+    steps = warmup_queue(state)
+    if not steps:
         state.phase = PHASE_ROLEPLAY
         return None
     state.phase = PHASE_WARMUP
-    return phrases[0]
+    return steps[0].phrase
 
 
 def apply_warmup_attempt(state: SessionState, utterance: str) -> dict[str, Any]:
     """Score one phrase leniently and advance. A miss is not a failure."""
-    phrases = state.scenario.key_phrases
-    if not phrases or state.warmup_index >= len(phrases):
+    steps = warmup_queue(state)
+    if not steps or state.warmup_index >= len(steps):
         state.phase = PHASE_ROLEPLAY
-        return {"passed": True, "complete": True, "phrase": None, "next_phrase": None}
-    phrase = phrases[state.warmup_index]
+        return {
+            "passed": True,
+            "complete": True,
+            "phrase": None,
+            "next_phrase": None,
+            "card_id": None,
+        }
+    step = steps[state.warmup_index]
+    phrase = step.phrase
     passed = match_goal(utterance, _phrase_accept(phrase))
     state.warmup_index += 1
-    complete = state.warmup_index >= len(phrases)
+    complete = state.warmup_index >= len(steps)
     if complete:
         state.phase = PHASE_ROLEPLAY
-    next_phrase = None if complete else phrases[state.warmup_index]
+    next_phrase = None if complete else steps[state.warmup_index].phrase
     return {
         "passed": passed,
         "complete": complete,
         "phrase": phrase,
         "next_phrase": next_phrase,
+        "card_id": step.card_id,
     }
 
 

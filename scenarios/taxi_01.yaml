@@ -183,4 +183,4 @@ success:
     3: "no hints above level default"
     2: "one rung climbed"
     1: "completed"
-srs_tags: [taxi, transport, payment, destination]
+srs_tags: [taxi, transport, payment, destination, ordering]

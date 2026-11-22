@@ -28,8 +28,8 @@ from machi.clients import (
 )
 from machi.config import settings
 from machi.db import (
+    due_cards_overlapping,
     enroll_corrections,
-    get_review_card,
     init_db,
     list_sessions,
     next_due_cards,
@@ -37,14 +37,23 @@ from machi.db import (
     record_correction,
     record_debrief,
     record_session,
-    save_card_review,
     session_progress,
 )
-from machi.fsrs import FsrsState, format_dt, parse_dt, schedule
+from machi.fsrs import format_dt
 from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
 from machi.llm import LlmClient, render_prompt
-from machi.nlp import build_ruby_html, to_romaji
+from machi.nlp import build_ruby_html, match_strength, to_romaji
 from machi.npc_audio import cached_npc_wav
+from machi.review import (
+    REVIEW_BUDGET_S,
+    REVIEW_CARD_LIMIT,
+    ReviewSession,
+    grade_match,
+    new_review_session,
+    rate_card,
+    record_grade,
+    review_payload,
+)
 from machi.scenario_loader import load_all_scenarios
 from machi.schema import ScenarioSpec
 from machi.session import (
@@ -52,7 +61,9 @@ from machi.session import (
     PHASE_DEBRIEF,
     PHASE_ROLEPLAY,
     PHASE_WARMUP,
+    WEAVE_LIMIT,
     SessionState,
+    WarmupStep,
     advance_node,
     apply_warmup_attempt,
     begin_warmup,
@@ -64,14 +75,17 @@ from machi.session import (
     evaluate_turn,
     expected_goals,
     goals_completed,
+    key_phrase_for_card,
     new_session,
     normalize_tutor_payload,
     note_hint_peaks,
     remember_correction,
     reset_flow,
+    reviews_briefing_line,
     scenario_complete,
     scripted_npc_line,
     stars_earned,
+    warmup_queue,
 )
 from machi.turn_taking import (
     TurnDecision,
@@ -86,6 +100,7 @@ logger = logging.getLogger(__name__)
 
 SCENARIOS: dict = {}
 SESSIONS: dict[str, SessionState] = {}
+REVIEWS: dict[str, ReviewSession] = {}
 LLM = LlmClient()
 
 
@@ -165,6 +180,12 @@ class ReviewRequest(BaseModel):
     rating: Literal["again", "hard", "good", "easy"]
 
 
+class ReviewAnswerRequest(BaseModel):
+    text: str | None = None
+    audio_b64: str | None = None
+    self_rating: Literal["again", "hard", "good", "easy"] | None = None
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {
@@ -213,6 +234,7 @@ async def create_session(body: CreateSessionRequest) -> dict[str, Any]:
     if not spec:
         raise HTTPException(status_code=404, detail="scenario not found")
     state = new_session(spec, level=body.level)
+    review_phrases = _weave_due_reviews(state)
     SESSIONS[state.id] = state
     record_session(Path(settings.db_path), state.id, spec.id, body.level)
     node = spec.flow.nodes[state.node_id]
@@ -231,6 +253,9 @@ async def create_session(body: CreateSessionRequest) -> dict[str, Any]:
         "title_en": spec.title.en,
         "title_ja": spec.title.ja,
         "briefing_en": spec.goals[0].prompt_en if spec.goals else "",
+        "reviews_line": reviews_briefing_line(review_phrases),
+        "review_phrases": [phrase.model_dump() for phrase in review_phrases],
+        "warmup_total": len(warmup_queue(state)),
         "required_goals": list(spec.success.required),
         "key_phrases": [kp.model_dump() for kp in spec.key_phrases],
         "goals": [
@@ -292,53 +317,58 @@ async def reviews_next(limit: int = 20) -> dict[str, Any]:
 @app.post("/reviews")
 async def post_review(body: ReviewRequest) -> dict[str, Any]:
     """Apply one FSRS-4.5 rating and store the next due time."""
-    path = Path(settings.db_path)
-    row = get_review_card(path, body.card_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="card not found")
+    return _rate_or_404(body.card_id, body.rating)
+
+
+@app.post("/review/sessions")
+async def create_review_session() -> dict[str, Any]:
+    """Open a Sora mini-situation for up to eight due cards (two-minute soft budget)."""
     now = datetime.now(UTC)
-    reviewed = schedule(
-        FsrsState(
-            state=str(row["state"]),
-            stability=row["stability"],
-            difficulty=row["difficulty"],
-            reps=int(row["reps"] or 0),
-            lapses=int(row["lapses"] or 0),
-            last_review_at=parse_dt(row["last_review_at"]),
-        ),
-        body.rating,
-        now,
+    cards = next_due_cards(
+        Path(settings.db_path),
+        now=format_dt(now),
+        limit=REVIEW_CARD_LIMIT,
     )
-    due_at = reviewed.due_at
-    stability = reviewed.stability
-    difficulty = reviewed.difficulty
-    reviewed_at = reviewed.last_review_at
-    last_rating = reviewed.last_rating
-    if (
-        due_at is None
-        or stability is None
-        or difficulty is None
-        or reviewed_at is None
-        or last_rating is None
-    ):
-        raise HTTPException(status_code=500, detail="review_failed")
-    save_card_review(
-        path,
-        body.card_id,
-        state=reviewed.state,
-        due_at=format_dt(due_at),
-        stability=stability,
-        difficulty=difficulty,
-        reps=reviewed.reps,
-        lapses=reviewed.lapses,
-        last_rating=last_rating,
-        last_review_at=format_dt(reviewed_at),
+    session = new_review_session(cards, now=now)
+    session.budget_s = REVIEW_BUDGET_S
+    REVIEWS[session.id] = session
+    return review_payload(session)
+
+
+@app.get("/review/sessions/{review_id}")
+async def get_review_session(review_id: str) -> dict[str, Any]:
+    """Progress for one spoken review. A finished session includes the summary."""
+    session = REVIEWS.get(review_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    return review_payload(session)
+
+
+@app.post("/review/sessions/{review_id}/answer")
+async def answer_review_session(review_id: str, body: ReviewAnswerRequest) -> dict[str, Any]:
+    """Score one card with ASR or typed text and schedule the next FSRS due time."""
+    session = REVIEWS.get(review_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="review not found")
+    if session.complete or session.index >= len(session.items):
+        raise HTTPException(status_code=409, detail="review_complete")
+    now = datetime.now(UTC)
+    utterance = await _hear_utterance(
+        TurnRequest(text=body.text, audio_b64=body.audio_b64),
+        TurnLatency(),
     )
-    updated = get_review_card(path, body.card_id)
-    if updated is None:
-        raise HTTPException(status_code=404, detail="card not found")
-    updated["interval_days"] = reviewed.interval_days
-    return updated
+    item = session.items[session.index]
+    match, rating = grade_match(utterance, item, body.self_rating)
+    card = _rate_or_404(item.card_id, rating, now=now)
+    record_grade(
+        session,
+        utterance=utterance,
+        match=match,
+        rating=rating,
+        card=card,
+        now=now,
+    )
+    return review_payload(session)
 
 
 @app.post("/sessions/{session_id}/reviews")
@@ -440,6 +470,34 @@ def _control_payload(state: SessionState, *, kind: str, reset: bool) -> dict[str
     )
 
 
+def _weave_due_reviews(state: SessionState) -> list:
+    """Append up to two due cards whose tags overlap this scenario. Lenient warm-up."""
+    now = format_dt(datetime.now(UTC))
+    cards = due_cards_overlapping(
+        Path(settings.db_path),
+        now=now,
+        tags=list(state.scenario.srs_tags),
+        limit=WEAVE_LIMIT,
+    )
+    phrases = []
+    steps = [WarmupStep(phrase=phrase) for phrase in state.scenario.key_phrases]
+    for card in cards:
+        phrase = key_phrase_for_card(card)
+        steps.append(WarmupStep(phrase=phrase, card_id=int(card["card_id"])))
+        phrases.append(phrase)
+    state.warmup_steps = steps
+    return phrases
+
+
+def _rate_or_404(card_id: int, rating: str, *, now: datetime | None = None) -> dict[str, Any]:
+    try:
+        return rate_card(Path(settings.db_path), card_id, rating, now or datetime.now(UTC))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="card not found") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail="review_failed") from exc
+
+
 def _warmup_status(
     state: SessionState,
     *,
@@ -447,13 +505,13 @@ def _warmup_status(
     passed: bool | None,
     attempt: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    phrases = state.scenario.key_phrases
+    steps = warmup_queue(state)
     if attempt is not None:
         phrase = attempt.get("phrase")
         next_phrase = attempt.get("next_phrase")
         complete = bool(attempt.get("complete"))
     else:
-        phrase = phrases[0] if phrases and state.phase == PHASE_WARMUP else None
+        phrase = steps[0].phrase if steps and state.phase == PHASE_WARMUP else None
         next_phrase = phrase
         complete = state.phase == PHASE_ROLEPLAY
     if complete and state.phase == PHASE_ROLEPLAY:
@@ -487,7 +545,7 @@ def _warmup_status(
     payload.update(
         {
             "warmup_index": state.warmup_index,
-            "warmup_total": len(phrases),
+            "warmup_total": len(steps),
             "warmup_passed": passed,
             "warmup_complete": complete,
             "phrase": phrase.model_dump() if phrase is not None else None,
@@ -514,7 +572,14 @@ async def _warmup_pipeline(
         attempt=attempt,
     )
     phrase = attempt.get("phrase")
-    if attempt.get("passed") is False and phrase is not None:
+    card_id = attempt.get("card_id")
+    if card_id and phrase is not None:
+        rating = match_strength(utterance, [phrase.ja, phrase.kana, phrase.romaji, phrase.en])
+        updated = _rate_or_404(int(card_id), rating)
+        payload["review_card_id"] = int(card_id)
+        payload["review_rating"] = rating
+        payload["review_reps"] = updated.get("reps")
+    elif attempt.get("passed") is False and phrase is not None:
         item = remember_correction(
             state,
             {"correction_ja": phrase.ja, "correction_en": phrase.en},

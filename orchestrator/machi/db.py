@@ -505,6 +505,26 @@ def enroll_corrections(path: Path, session_id: str, *, due_at: str) -> int:
         conn.close()
 
 
+def due_cards_overlapping(
+    path: Path,
+    *,
+    now: str,
+    tags: list[str],
+    limit: int,
+) -> list[dict]:
+    """Due cards that share at least one tag with ``tags``, soonest first."""
+    wanted = {part for part in tags if part}
+    if limit < 1 or not wanted:
+        return []
+    matched: list[dict] = []
+    for card in next_due_cards(path, now=now, limit=200):
+        if wanted.intersection(card["srs_tags"]):
+            matched.append(card)
+        if len(matched) >= limit:
+            break
+    return matched
+
+
 def next_due_cards(path: Path, *, now: str, limit: int) -> list[dict]:
     """Due cards soonest first. A null due time is due now."""
     conn = _connect(path)

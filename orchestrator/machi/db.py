@@ -1,33 +1,61 @@
-"""SQLite progress store (minimal v0)."""
+"""SQLite progress store.
+
+Schema v2 is applied by ``init_db``. Databases created before versioning (v1
+sessions + attempts only) are altered in place. Debrief writes session stars,
+completion, and the max hint rung, plus one ``hint:{goal_id}`` attempt row per
+goal so per-goal peaks survive in the attempt columns.
+"""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
+SCHEMA_VERSION = 2
+
+# Historical v1 DDL. Kept so migrations and tests share one literal.
+V1_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  scenario_id TEXT NOT NULL,
+  level INTEGER NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  node_id TEXT,
+  utterance TEXT,
+  goal_hits TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+_SESSION_COLUMNS_V2 = (
+    ("stars", "INTEGER"),
+    ("max_hint_rung", "INTEGER"),
+    ("completed", "INTEGER NOT NULL DEFAULT 0"),
+)
+_ATTEMPT_COLUMNS_V2 = (
+    ("hint_rung", "INTEGER"),
+    ("correction_ja", "TEXT"),
+    ("correction_en", "TEXT"),
+)
+
 
 def init_db(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     try:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS sessions (
-              id TEXT PRIMARY KEY,
-              scenario_id TEXT NOT NULL,
-              level INTEGER NOT NULL,
-              created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS attempts (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              session_id TEXT NOT NULL,
-              node_id TEXT,
-              utterance TEXT,
-              goal_hits TEXT,
-              created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
+        has_sessions = _table_exists(conn, "sessions")
+        _ensure_version_table(conn)
+        version = _stored_version(conn)
+        if not has_sessions:
+            _create_current_tables(conn)
+            _write_version(conn, SCHEMA_VERSION)
+        elif version is None or version < SCHEMA_VERSION:
+            _migrate_v1_to_v2(conn)
+            _write_version(conn, SCHEMA_VERSION)
         conn.commit()
     finally:
         conn.close()
@@ -37,7 +65,13 @@ def record_session(path: Path, session_id: str, scenario_id: str, level: int) ->
     conn = sqlite3.connect(path)
     try:
         conn.execute(
-            "INSERT OR REPLACE INTO sessions (id, scenario_id, level) VALUES (?, ?, ?)",
+            """
+            INSERT INTO sessions (id, scenario_id, level)
+            VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              scenario_id = excluded.scenario_id,
+              level = excluded.level
+            """,
             (session_id, scenario_id, level),
         )
         conn.commit()
@@ -51,13 +85,239 @@ def record_attempt(
     node_id: str,
     utterance: str,
     goal_hits: list[str],
+    *,
+    hint_rung: int | None = None,
+    correction_ja: str | None = None,
+    correction_en: str | None = None,
 ) -> None:
     conn = sqlite3.connect(path)
     try:
         conn.execute(
-            "INSERT INTO attempts (session_id, node_id, utterance, goal_hits) VALUES (?, ?, ?, ?)",
-            (session_id, node_id, utterance, ",".join(goal_hits)),
+            """
+            INSERT INTO attempts (
+              session_id, node_id, utterance, goal_hits, hint_rung, correction_ja, correction_en
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                node_id,
+                utterance,
+                ",".join(goal_hits),
+                hint_rung,
+                correction_ja,
+                correction_en,
+            ),
         )
         conn.commit()
     finally:
         conn.close()
+
+
+def record_debrief(
+    path: Path,
+    session_id: str,
+    *,
+    stars: int,
+    completed: bool,
+    hint_peaks: dict[str, int],
+    max_hint_rung: int,
+) -> None:
+    """Persist the debrief summary. Replaces prior per-goal hint rows."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            UPDATE sessions
+            SET stars = ?, max_hint_rung = ?, completed = ?
+            WHERE id = ?
+            """,
+            (stars, max_hint_rung, 1 if completed else 0, session_id),
+        )
+        conn.execute(
+            "DELETE FROM attempts WHERE session_id = ? AND node_id LIKE 'hint:%'",
+            (session_id,),
+        )
+        for goal_id, rung in hint_peaks.items():
+            if not goal_id:
+                continue
+            conn.execute(
+                """
+                INSERT INTO attempts (session_id, node_id, utterance, goal_hits, hint_rung)
+                VALUES (?, ?, '', ?, ?)
+                """,
+                (session_id, f"hint:{goal_id}", goal_id, int(rung)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def session_progress(path: Path, session_id: str) -> dict | None:
+    conn = _connect(path)
+    try:
+        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if row is None:
+            return None
+        attempts = conn.execute(
+            "SELECT * FROM attempts WHERE session_id = ? ORDER BY id",
+            (session_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return _progress_payload(row, attempts)
+
+
+def list_sessions(path: Path) -> list[dict]:
+    conn = _connect(path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT * FROM sessions
+            ORDER BY created_at, id
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_session_summary(row) for row in rows]
+
+
+def _progress_payload(row: sqlite3.Row, attempts: list[sqlite3.Row]) -> dict:
+    hint_rows = [item for item in attempts if _is_hint_row(item["node_id"])]
+    spoken = [item for item in attempts if not _is_hint_row(item["node_id"])]
+    if hint_rows:
+        hint_max = {_hint_goal(item["node_id"]): item["hint_rung"] for item in hint_rows}
+    else:
+        hint_max = _hint_max_from_attempts(spoken)
+    payload = _session_summary(row)
+    payload["hint_max"] = hint_max
+    payload["attempts"] = [_attempt_payload(item) for item in spoken]
+    return payload
+
+
+def _session_summary(row: sqlite3.Row) -> dict:
+    return {
+        "session_id": row["id"],
+        "scenario_id": row["scenario_id"],
+        "level": row["level"],
+        "stars": row["stars"],
+        "max_hint_rung": row["max_hint_rung"],
+        "completed": bool(row["completed"]),
+        "created_at": row["created_at"],
+    }
+
+
+def _attempt_payload(row: sqlite3.Row) -> dict:
+    raw_hits = row["goal_hits"] or ""
+    return {
+        "id": row["id"],
+        "node_id": row["node_id"],
+        "utterance": row["utterance"],
+        "goal_hits": [part for part in raw_hits.split(",") if part],
+        "hint_rung": row["hint_rung"],
+        "correction_ja": row["correction_ja"],
+        "correction_en": row["correction_en"],
+        "created_at": row["created_at"],
+    }
+
+
+def _hint_max_from_attempts(attempts: list[sqlite3.Row]) -> dict[str, int]:
+    peaks: dict[str, int] = {}
+    for row in attempts:
+        if row["hint_rung"] is None:
+            continue
+        for goal_id in (row["goal_hits"] or "").split(","):
+            if not goal_id:
+                continue
+            peaks[goal_id] = max(peaks.get(goal_id, 0), int(row["hint_rung"]))
+    return peaks
+
+
+def _is_hint_row(node_id: str | None) -> bool:
+    return bool(node_id) and node_id.startswith("hint:")
+
+
+def _hint_goal(node_id: str) -> str:
+    return node_id.removeprefix("hint:")
+
+
+def _connect(path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _ensure_version_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          version INTEGER NOT NULL
+        )
+        """
+    )
+
+
+def _stored_version(conn: sqlite3.Connection) -> int | None:
+    row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+    if row is None:
+        return None
+    return int(row[0])
+
+
+def _write_version(conn: sqlite3.Connection, version: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO schema_version (id, version) VALUES (1, ?)
+        ON CONFLICT(id) DO UPDATE SET version = excluded.version
+        """,
+        (version,),
+    )
+
+
+def _create_current_tables(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS sessions (
+          id TEXT PRIMARY KEY,
+          scenario_id TEXT NOT NULL,
+          level INTEGER NOT NULL,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          stars INTEGER,
+          max_hint_rung INTEGER,
+          completed INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          node_id TEXT,
+          utterance TEXT,
+          goal_hits TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          hint_rung INTEGER,
+          correction_ja TEXT,
+          correction_en TEXT
+        );
+        """
+    )
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    for name, decl in _SESSION_COLUMNS_V2:
+        _add_column(conn, "sessions", name, decl)
+    for name, decl in _ATTEMPT_COLUMNS_V2:
+        _add_column(conn, "attempts", name, decl)
+
+
+def _add_column(conn: sqlite3.Connection, table: str, name: str, decl: str) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if name in existing:
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")

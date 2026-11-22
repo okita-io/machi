@@ -30,11 +30,13 @@ services:
       ASR_URL: ${ASR_URL:-http://asr-cpu:8101}
       TTS_URL: ${TTS_URL:-http://tts-cpu:8102}
       ASSETS_BASE_URL: ${ASSETS_BASE_URL:-http://localhost:8080}
+      ASSETS_PATH: ${ASSETS_PATH:-/assets}
       SCENARIOS_PATH: /scenarios
       DB_PATH: /data/machi.sqlite
     volumes:
       - ./data:/data
       - ./scenarios:/scenarios:ro
+      - ./assets:/assets:ro
 
   asr-cpu:
     build: ./speech-cpu

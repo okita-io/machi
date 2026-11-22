@@ -19,10 +19,15 @@ class TurnLatency:
     """Records stage durations in milliseconds.
 
     A stage that did not run is stored as None. It is never recorded as zero.
+    ``sources`` records where a stage's result came from (TTS: ``cache`` or ``live``).
     """
 
     def __init__(self) -> None:
         self.stages_ms: dict[str, float | None] = {}
+        self.sources: dict[str, str] = {}
+
+    def set_source(self, stage: str, source: str) -> None:
+        self.sources[stage] = source
 
     @contextmanager
     def measure(self, stage: str) -> Iterator[None]:
@@ -49,6 +54,9 @@ class TurnLatency:
             if ms is None:
                 continue
             headers[f"X-Latency-{stage.upper()}"] = f"{ms:.3f}"
+        tts_source = self.sources.get(STAGE_TTS)
+        if tts_source:
+            headers["X-Latency-TTS-Source"] = tts_source
         return headers
 
     def emit(self, *, session_id: str, cancelled: bool = False) -> dict[str, float | None]:
@@ -63,6 +71,7 @@ class TurnLatency:
             "session_id": session_id,
             "cancelled": cancelled,
             "stages_ms": stages,
+            "sources": dict(self.sources),
         }
         logger.info("%s", json.dumps(payload, separators=(",", ":")))
         return stages

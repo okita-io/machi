@@ -12,7 +12,7 @@ Full product and technical spec: [docs/SPEC.md](docs/SPEC.md).
 | Orchestrator | Python 3.12, FastAPI, WebSocket/REST, OpenAI SDK |
 | Text tools | [cutlet](https://github.com/polm/cutlet) romaji and fugashi + unidic-lite furigana (MIT / BSD), default in the orchestrator image. `npc_kana` in YAML is an optional whole-line override |
 | Scenario data | YAML + Pydantic validation |
-| Progress | SQLite file on `./data` volume |
+| Progress | SQLite file on `./data` volume (schema v2: stars, hint peaks, completion) |
 | CPU speech | `speech-cpu` mock ASR + stub WAV TTS |
 | GPU speech | `asr`, `tts`, `pron` containers (stubs; interfaces only) |
 | Assets | nginx static `./assets` |
@@ -65,6 +65,7 @@ make lint    # ruff + eslint
 # Orchestrator
 cd orchestrator && pip install -e ".[dev]"
 SCENARIOS_PATH=../scenarios DB_PATH=../data/machi.sqlite \
+  ASSETS_PATH=../assets \
   ASR_URL=http://127.0.0.1:8101 TTS_URL=http://127.0.0.1:8102 \
   uvicorn machi.main:app --reload --port 8100
 
@@ -149,6 +150,14 @@ ASR_URL=http://127.0.0.1:8101 python -m pytest -m accent orchestrator/tests/test
 
 Each WAV is posted to `{ASR_URL}/v1/transcribe`. The score is word error rate on cutlet romaji tokens, so a kanji line and its kana reading can match. The test fails when mean WER is above **0.35**. The speech-cpu mock returns `ふたりです` for every clip and fails that bar. A default `pytest` deselects `accent`; it still checks that the checked-in WAVs are small 16 kHz mono PCM16 and that every expected line is in the ramen scenario.
 
+### Baked NPC lines
+
+`scripts/bake_npc_audio.py` writes `assets/audio/{scenario_id}/{node_id}.wav` and a `manifest.json` for every fixed `npc` line. The restaurant files in git are CPU stub wavs. Start the TTS stub, then regenerate:
+
+```bash
+TTS_URL=http://127.0.0.1:8102 python scripts/bake_npc_audio.py
+```
+
 ## Repository layout
 
 ```
@@ -157,7 +166,7 @@ orchestrator/     Session + flow engine + LLM client
 speech-cpu/       CPU-profile ASR/TTS stubs
 asr/ tts/ pron/   GPU-profile stubs (M0/M2)
 scenarios/        YAML scenarios (restaurant MVP included)
-assets/           Scene backgrounds and sprites
+assets/           Scene backgrounds, sprites, and baked NPC audio
 docs/SPEC.md      Product spec
 docker-compose.yml
 ```
@@ -168,14 +177,14 @@ docker-compose.yml
 | --- | --- |
 | Scenario schema + restaurant YAML | Real |
 | Flow / goal matching | Real |
-| SQLite session logging | Real (minimal) |
+| SQLite session logging | Real. Debrief writes stars, completion, and per-goal hint peaks. `GET /sessions/{id}/progress` reads them back |
 | Romaji (cutlet) | Real for NPC and learner lines. The web UI shows the romaji row when the hint level is 2 or higher (selector defaults to 2) |
 | Furigana | Per-token ruby from fugashi + unidic-lite for any line. Scenario `npc_kana` overrides that reading when the spoken line still matches the script |
 | Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks and waits for `turn` |
 | Turn pipeline | Audio-only `audio_b64` (REST or WebSocket) runs ASR → LLM → TTS. Typed text skips ASR |
 | Hands-free | Silero VAD + silence heuristic (500 ms ceiling). Smart Turn v3 optional |
 | Barge-in | New capture stops playback; `audio_start` or `turn` cancels the in-flight server turn |
-| ASR / TTS (CPU) | Mock / stub WAV |
+| ASR / TTS (CPU) | Mock / stub WAV. Fixed NPC lines in `assets/audio/` play from disk when the spoken text still matches the scenario; other lines use live TTS |
 | ASR / TTS / pron (GPU) | Health stubs |
 | LLM | Live when `LLM_BASE_URL` set; else mock |
 | Lip flap and hint ladder | In the scene |

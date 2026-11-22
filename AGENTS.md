@@ -27,7 +27,7 @@ Machi drops an English-speaking learner into illustrated real-world Japanese sce
 | `tts/` | GPU TTS stub → Qwen3-TTS / Irodori / Kokoro |
 | `pron/` | Pronunciation scoring stub (M2) |
 | `scenarios/` | One YAML per scenario; Pydantic schema in `orchestrator/machi/schema.py` |
-| `assets/` | Static backgrounds, sprites (nginx `:8080`) |
+| `assets/` | Static backgrounds, sprites, baked NPC audio (nginx `:8080`) |
 | `docs/SPEC.md` | Full architecture, models, latency budgets, milestones |
 | `docker-compose.yml` | Profiles: `cpu`, `spark`, `rtx3090` |
 | `.env.example` | Documented env vars — copy to `.env`, never commit `.env` |
@@ -166,9 +166,9 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M1-07 | [ ] | Pre-baked WebP background + sprite sheet for ramen (`assets/`) | — | Replace SVG placeholders; `scene.background` paths in YAML |
 | M1-08 | [x] | Scenario flow: debrief node (stars, goals, two corrections) | S0-03 | UI screen after `pay.end`; required goals from `success.required` |
 | M1-09 | [x] | Briefing + warm-up steps before role-play | S0-02 | Key phrases with tap-to-hear (TTS) |
-| M1-10 | [ ] | Expand SQLite: stars, hint max per goal, completion flag | S0-04 | Schema migration or version table; debrief writes summary |
+| M1-10 | [x] | Expand SQLite: stars, hint max per goal, completion flag | S0-04 | Schema migration or version table; debrief writes summary |
 | M1-11 | [x] | LLM NPC + tutor prompt templates from spec | S0-05 | Template files under `orchestrator/prompts/`; JSON tutor schema validated |
-| M1-12 | [ ] | Pre-rendered NPC line audio at bake time for fixed `flow.nodes.*.npc` | M0-10, M1-07 | `assets/audio/` map; orchestrator prefers file over live TTS when present |
+| M1-12 | [x] | Pre-rendered NPC line audio at bake time for fixed `flow.nodes.*.npc` | M0-10, M1-07 | `assets/audio/` map; orchestrator prefers file over live TTS when present |
 
 ---
 
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M1-08 (debrief), M1-09 (briefing and warm-up), and M1-11 (prompt templates). Scaffold baseline remains PR #1._
+_Last updated with M1-10 (SQLite progress) and M1-12 (baked NPC audio). Scaffold baseline remains PR #1._

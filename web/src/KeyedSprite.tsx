@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { keyChromaPixels } from "./chroma";
+import { spriteSrcOnMissing } from "./soraExpressions";
 
 const keyed = new Map<string, Promise<string>>();
 
@@ -44,14 +45,24 @@ export function KeyedSprite({ src, expression }: { src: string; expression: stri
   useEffect(() => {
     let cancel = false;
     setUrl(null);
-    keySprite(src).then(
-      (next) => {
-        if (!cancel) setUrl(next);
-      },
-      () => {
-        if (!cancel) setUrl(src);
-      },
-    );
+
+    const load = (srcToLoad: string, allowFallback: boolean) => {
+      keySprite(srcToLoad).then(
+        (next) => {
+          if (!cancel) setUrl(next);
+        },
+        () => {
+          const fallback = spriteSrcOnMissing(srcToLoad);
+          if (allowFallback && fallback !== srcToLoad) {
+            load(fallback, false);
+            return;
+          }
+          if (!cancel) setUrl(srcToLoad);
+        },
+      );
+    };
+
+    load(src, true);
     return () => {
       cancel = true;
     };

@@ -1,3 +1,9 @@
+# Speech placement: docs/ADR-001-speech-placement.md
+# Default when both GPUs are up: ASR/TTS on the RTX 3090 (profile rtx3090)
+# so Spark keeps headroom for the LLM and April's ComfyUI (:8188).
+# Start profile spark for speech only when the 3090 is absent.
+# Profile cpu is the stub demo. Knobs: GPU_MEM_FRACTION, ASR_ENGINE, GPU_BASE, SPEECH_PROFILE.
+
 x-gpu: &gpu
   deploy:
     resources:
@@ -35,10 +41,14 @@ services:
       ASSETS_PATH: ${ASSETS_PATH:-/assets}
       SCENARIOS_PATH: /scenarios
       DB_PATH: /data/machi.sqlite
+      # voices/voices.yaml. Empty SPEECH_PROFILE uses each voice's first engine.
+      VOICES_PATH: /voices/voices.yaml
+      SPEECH_PROFILE: ${SPEECH_PROFILE:-}
     volumes:
       - ./data:/data
       - ./scenarios:/scenarios:ro
       - ./assets:/assets:ro
+      - ./voices:/voices:ro
 
   asr-cpu:
     build: ./speech-cpu
@@ -64,7 +74,11 @@ services:
         BASE: ${GPU_BASE:-nvcr.io/nvidia/pytorch:25.01-py3}
     profiles: [spark, rtx3090]
     environment:
+      # kotoba-whisper-faster is x86 / rtx3090 only. See docs/ADR-001-speech-placement.md.
       ASR_ENGINE: ${ASR_ENGINE:-qwen3-asr-0.6b}
+      # Cap this process. On Spark keep it ≤ 0.35 and do not leave the container up
+      # beside the LLM and ComfyUI. Stop `asr` to unload.
+      GPU_MEM_FRACTION: ${GPU_MEM_FRACTION:-0.40}
     ports:
       - "8101:8101"
     volumes:
@@ -78,7 +92,9 @@ services:
         BASE: ${GPU_BASE:-nvcr.io/nvidia/pytorch:25.01-py3}
     profiles: [spark, rtx3090]
     environment:
+      # Same map the orchestrator resolves. See docs/ADR-001-speech-placement.md.
       VOICES: /voices/voices.yaml
+      GPU_MEM_FRACTION: ${GPU_MEM_FRACTION:-0.40}
     ports:
       - "8102:8102"
     volumes:

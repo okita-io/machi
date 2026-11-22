@@ -14,7 +14,7 @@ import {
   type SessionStart,
   type TurnResult,
 } from "./api";
-import { expressionFromCoach, type SoraExpression } from "./coach";
+import { expressionFromCoach } from "./coach";
 import {
   DEFAULT_HINT_LEVEL,
   HINT_LEVELS,
@@ -38,9 +38,10 @@ import { KeyedSprite } from "./KeyedSprite";
 import type { MouthFrame } from "./mouth";
 import { BriefingScreen, DebriefScreen, WarmupScreen } from "./phases";
 import { advisoryLine, type PitchAdvisory } from "./pitchAdvisory";
-import { soraSpriteUrl } from "./sprites";
+import { type SoraExpression, soraSpriteUrl } from "./soraExpressions";
 import { townMapUrl } from "./townMap";
 import { TownView } from "./TownView";
+import { useViewport } from "./useViewport";
 import "./App.css";
 
 type AppRoute = "town" | "play";
@@ -84,8 +85,16 @@ function starGlyphs(count: number): string {
   return "★".repeat(count) + "☆".repeat(Math.max(0, 3 - count));
 }
 
+function appClass(town: boolean, phone: boolean): string {
+  const parts = ["app"];
+  if (town) parts.push("town-mode");
+  if (phone) parts.push("phone");
+  return parts.join(" ");
+}
+
 export default function App() {
   const route = useHashRoute();
+  const { phone } = useViewport();
   const [level, setLevel] = useState<HintLevel>(DEFAULT_HINT_LEVEL);
   const [scenarioId, setScenarioId] = useState("restaurant_ramen_01");
   const [catalog, setCatalog] = useState<ScenarioSummary[] | null>(null);
@@ -345,7 +354,7 @@ export default function App() {
   if (route === "town") {
     const mapUrl = catalog?.[0]?.scene.background ? townMapUrl(catalog[0].scene.background) : "";
     return (
-      <div className="app town-mode">
+      <div className={appClass(true, phone)} data-viewport={phone ? "phone" : "wide"}>
         <header>
           <h1>Machi</h1>
           <span className="badge">CPU demo</span>
@@ -398,7 +407,7 @@ export default function App() {
   const spriteSrc = soraSpriteUrl(session.scene.guide_sprite, expression);
 
   return (
-    <div className="app">
+    <div className={appClass(false, phone)} data-viewport={phone ? "phone" : "wide"}>
       <header>
         <h1>Machi</h1>
         <span className="badge">CPU demo</span>
@@ -421,7 +430,9 @@ export default function App() {
           </select>
         </label>
       </header>
-      <main className="stage" style={{ backgroundImage: `url(${session.scene.background})` }}>
+      <div className="scene-column">
+      <main className="stage">
+        <img className="scene-plate" src={session.scene.background} alt="" />
         <div className="guide-slot">
           <KeyedSprite src={spriteSrc} expression={expression} />
           <span className={`mouth ${mouth}`} data-mouth={mouth} aria-hidden="true" />
@@ -484,13 +495,14 @@ export default function App() {
           {hintError ? <p className="hint-error">{hintError}</p> : null}
         </div>
         ) : null}
+      </main>
         {npc && (
           <div className="subtitle">
             {learner && <SubtitleLine role="learner" label="You" line={learner} level={level} />}
             <SubtitleLine role="npc" label="Staff" line={npc} level={level} />
           </div>
         )}
-      </main>
+      </div>
       <aside className="coach" aria-live="polite">
         <h2>Sora · coach</h2>
         <p className="expression-id" data-expression={expression}>

@@ -1,15 +1,8 @@
+import { type SoraCoachExpression } from "./soraExpressions.ts";
+
 /** Sora's out-of-role expression, driven by the tutor payload. */
 
-export const SORA_EXPRESSIONS = [
-  "happy",
-  "think",
-  "cheer",
-  "surprised",
-  "sorry",
-  "point",
-] as const;
-
-export type SoraExpression = (typeof SORA_EXPRESSIONS)[number];
+export type SoraExpression = SoraCoachExpression;
 
 const SENTIMENT: Record<string, SoraExpression> = {
   happy: "happy",

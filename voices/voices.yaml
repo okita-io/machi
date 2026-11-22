@@ -1,10 +1,90 @@
-# Voice routing for GPU TTS profile (stub until models are wired)
-sora:
-  engine: irodori
-  design: gentle young woman, warm, slightly playful
-npc:
-  engine: qwen3_tts
-  speaker: Ono_Anna
-fallback:
-  engine: kokoro
-  speaker: jf_alpha
+# Voice map for Sora and each scenario NPC.
+# The orchestrator resolves a speaker id to an engine name from `fallback`.
+# GPU TTS reads this file (`VOICES`). Licenses stay Apache-2.0, MIT, or BSD.
+# Profile names: cpu, stub (the demo bucket), spark, rtx3090.
+# Placement: docs/ADR-001-speech-placement.md.
+
+engines:
+  irodori:
+    repo: Aratako/Irodori-TTS-v4.1-Small
+    license: MIT
+    profiles: [spark, rtx3090]
+  kokoro:
+    repo: hexgrad/Kokoro-82M
+    license: Apache-2.0
+    # CPU fallback (M4-05). Also legal on the GPU boxes if Irodori is down.
+    speaker: jf_alpha
+    profiles: [cpu, stub, spark, rtx3090]
+  qwen3_tts:
+    repo: Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice
+    license: Apache-2.0
+    # CustomVoice has one Japanese speaker. NPC styles distinguish the roles.
+    speaker: Ono_Anna
+    profiles: [spark, rtx3090]
+  stub:
+    repo: machi/speech-cpu
+    license: MIT
+    profiles: [cpu, stub, spark, rtx3090]
+
+voices:
+  sora:
+    role: guide
+    aliases: [guide]
+    voice_id: irodori_small
+    version: v4.1
+    design: "gentle young woman, warm, slightly playful"
+    fallback: [irodori, kokoro, stub]
+
+  staff_tanaka:
+    role: npc
+    scenario: restaurant_ramen_01
+    engine: qwen3_tts
+    voice_id: Ono_Anna
+    speaker: Ono_Anna
+    style: "bright, quick, polite"
+    fallback: [qwen3_tts, stub]
+
+  clerk_aoki:
+    role: npc
+    scenario: konbini_checkout_01
+    engine: qwen3_tts
+    voice_id: Ono_Anna
+    speaker: Ono_Anna
+    style: "bright, short, polite"
+    fallback: [qwen3_tts, stub]
+
+  local_mori:
+    role: npc
+    scenario: directions_01
+    engine: qwen3_tts
+    voice_id: Ono_Anna
+    speaker: Ono_Anna
+    style: "warm, clear, a little slow"
+    fallback: [qwen3_tts, stub]
+
+  attendant_kondo:
+    role: npc
+    scenario: coin_laundry_01
+    engine: qwen3_tts
+    voice_id: Ono_Anna
+    speaker: Ono_Anna
+    style: "plain, helpful, steady"
+    fallback: [qwen3_tts, stub]
+
+  driver_sato:
+    role: npc
+    scenario: taxi_01
+    engine: qwen3_tts
+    voice_id: Ono_Anna
+    speaker: Ono_Anna
+    style: "low, steady, polite"
+    fallback: [qwen3_tts, stub]
+
+  clerk_hayashi:
+    role: npc
+    scenario: train_ticket_01
+    engine: qwen3_tts
+    voice_id: Ono_Anna
+    speaker: Ono_Anna
+    style: "clear, brisk, polite"
+    fallback: [qwen3_tts, stub]

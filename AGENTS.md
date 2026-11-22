@@ -100,10 +100,10 @@ Non-commercial models may only appear behind an explicit research flag if ever a
 
 - **Spark (aarch64):** Qwen3-ASR 0.6B/1.7B via transformers/vLLM; avoid CTranslate2 kotoba-whisper (x86). Cap `GPU_MEM_FRACTION` per service.
 - **RTX 3090 (x86):** kotoba-whisper-faster or Qwen3-ASR; LLM often remote on Spark via `LLM_BASE_URL`.
-- **Both boxes are shared with April** (ComfyUI `:8188`, art workloads). Keep speech service memory and concurrent sessions low; document which profile runs speech where in compose README.
+- **Both boxes are shared with April** (ComfyUI `:8188`, art workloads). Keep speech service memory and concurrent sessions low.
 - **CPU demo:** `speech-cpu` only — no large downloads.
 
-Open question **INFRA-01:** Default speech placement when Spark and 3090 are both available — prefer 3090 for ASR/TTS to spare Spark LLM/ComfyUI headroom unless latency tests say otherwise.
+**INFRA-01 (resolved):** Default speech placement is the RTX 3090 for ASR/TTS so Spark keeps headroom for the LLM and April's ComfyUI. Spark runs speech only when the 3090 is absent. The CPU profile is the demo. See [docs/ADR-001-speech-placement.md](docs/ADR-001-speech-placement.md).
 
 ---
 
@@ -209,8 +209,8 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
 | M4-01 | [ ] | Level 3/4 curveballs (`flow.branch` when `level_gte`) | M1-11 | Restaurant firmness question at L3+ |
-| M4-02 | [ ] | Sora expression set (6–8) + per-NPC voice map | M1-07, M1-05 | `voices/voices.yaml` complete |
-| M4-03 | [ ] | Phone layout (9:16 crop) | M1-07 | Responsive CSS; playable on mobile browser |
+| M4-02 | [x] | Sora expression set (6–8) + per-NPC voice map | M1-07, M1-05 | `voices/voices.yaml` complete |
+| M4-03 | [x] | Phone layout (9:16 crop) | M1-07 | Responsive CSS; playable on mobile browser |
 | M4-04 | [ ] | HTTPS for LAN (self-signed or Tailscale) | M0-01 | Mic works on phone; documented in README |
 | M4-05 | [ ] | **Kokoro-82M** CPU fallback in `speech-cpu` or `tts` | M0-10 | `cpu` profile optional real TTS without GPU |
 
@@ -230,7 +230,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| INFRA-01 | [ ] | Document speech host strategy (Spark vs 3090 vs split) | S0-06 | ADR in `docs/` or AGENTS update; compose comments |
+| INFRA-01 | [x] | Document speech host strategy (Spark vs 3090 vs split) | S0-06 | ADR in `docs/` or AGENTS update; compose comments |
 | INFRA-02 | [ ] | Wire `spark` profile: real ASR+TTS containers, `hf-cache`, GPU limits | M0-06, M0-10 | `docker compose --profile spark up` uses GPU not stubs |
 | INFRA-03 | [ ] | Wire `rtx3090` profile: kotoba + Qwen TTS; LLM remote | M0-08, INFRA-02 | `.env.rtx3090` example works |
 | INFRA-04 | [ ] | aarch64 Docker: NGC base, sdpa not flash-attn, no arm64 CTranslate2 | INFRA-02 | Multi-arch buildx doc in README |
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M1-10 (SQLite progress) and M1-12 (baked NPC audio). Scaffold baseline remains PR #1._
+_Last updated with M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._

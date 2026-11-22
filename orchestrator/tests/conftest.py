@@ -6,11 +6,27 @@ selects them (``pytest -m e2e_latency`` or ``pytest -m accent``).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from machi.config import settings
 
+_REPO = Path(__file__).resolve().parents[2]
+
 _LIVE = ("e2e_latency", "accent")
+
+
+@pytest.fixture(autouse=True)
+def _repo_voice_map():
+    """Resolution tests and turns use the repo map, not a caller's SPEECH_PROFILE."""
+    previous_profile = settings.speech_profile
+    previous_voices = settings.voices_path
+    settings.speech_profile = ""
+    settings.voices_path = str(_REPO / "voices" / "voices.yaml")
+    yield
+    settings.speech_profile = previous_profile
+    settings.voices_path = previous_voices
 
 
 @pytest.fixture(autouse=True)

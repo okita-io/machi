@@ -66,7 +66,7 @@ make test
 make lint
 ```
 
-Optional romaji: `pip install -e "./orchestrator[nlp]"` (cutlet + MeCab; MIT only).
+Romaji and furigana ship in the orchestrator image: **cutlet**, **fugashi**, and **unidic-lite** (MIT / BSD; dictionary is inside the unidic-lite wheel). `pip install -e "./orchestrator[nlp]"` still installs that same set. If the imports fail, `nlp.py` leaves the original text in place.
 
 Optional hands-free VAD: `pip install -e "./orchestrator[vad]"` and `python tools/fetch_vad_model.py` (Silero ONNX, MIT, not committed). Optional Smart Turn v3: `pip install -e "./orchestrator[smart-turn]"` with `SMART_TURN_ENABLED=1` (BSD-2-Clause, not in the default image). Push-to-talk bypasses both.
 
@@ -157,8 +157,8 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| M1-01 | [ ] | **fugashi** + unidic-lite furigana for any NPC line | S0-03 | `nlp.py` token ruby; not only `npc_kana` from YAML; MIT/BSD deps |
-| M1-02 | [ ] | **cutlet** romaji on all displayed Japanese (optional extra or default in Docker) | M1-01 | NPC + learner lines show romaji row when hint ≥ 2 |
+| M1-01 | [x] | **fugashi** + unidic-lite furigana for any NPC line | S0-03 | `nlp.py` token ruby; not only `npc_kana` from YAML; MIT/BSD deps |
+| M1-02 | [x] | **cutlet** romaji on all displayed Japanese (optional extra or default in Docker) | M1-01 | NPC + learner lines show romaji row when hint ≥ 2 |
 | M1-03 | [ ] | Hint ladder UI (EN → romaji → kana → none) + Help button | S0-07 | Rung climb on timeout/wrong/help; stars logic stub wired to `success.stars` |
 | M1-04 | [ ] | Coach side panel (Sora out-of-role); never block NPC audio | S0-05 | Tutor JSON populates coach; parallel LLM call pattern from spec |
 | M1-05 | [ ] | **Irodori-TTS v4.1 Small** for Sora (`guide` voice in YAML) | M0-10 | Distinct voice id for guide vs NPC |
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M0-11 (barge-in: stop playback and cancel the in-flight turn). Scaffold baseline remains PR #1._
+_Last updated with M1-01 (fugashi furigana) and M1-02 (cutlet romaji at hint level ≥ 2). Scaffold baseline remains PR #1._

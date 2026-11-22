@@ -26,6 +26,7 @@ export async function createSession(scenarioId: string, level = 1): Promise<Sess
 
 export type TurnResult = {
   learner_text: string;
+  learner: NpcLine;
   npc: NpcLine;
   coach: { coach_note_en: string; goal_hits: string[] };
   tts_audio_b64: string;

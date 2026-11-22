@@ -100,6 +100,9 @@ def test_audio_b64_only_turn_runs_asr_llm_tts(monkeypatch):
     assert turn.status_code == 200
     body = turn.json()
     assert body["learner_text"] == "ふたりです"
+    assert body["learner"]["ja"] == "ふたりです"
+    assert body["learner"]["romaji"] == to_romaji("ふたりです")
+    assert "<rt>ふたり</rt>" in body["learner"]["ruby_html"]
     assert body["goal_hits"] == ["party_size"]
     assert body["node_id"] == "seat"
     assert body["npc"]["ja"] == SEAT_JA
@@ -196,6 +199,7 @@ def test_ws_turn_without_text_runs_same_pipeline(monkeypatch):
 
     assert result["type"] == "turn_result"
     assert result["learner_text"] == "ふたりです"
+    assert result["learner"]["romaji"] == to_romaji("ふたりです")
     assert result["goal_hits"] == ["party_size"]
     assert result["npc"]["ja"] == SEAT_JA
     assert result["npc"]["romaji"] == to_romaji(SEAT_JA)

@@ -3,6 +3,7 @@ import { playNpcAudio } from "./audio/playback";
 import { useMic } from "./audio/useMic";
 import {
   createSession,
+  enrollReviews,
   fetchCoach,
   listScenarios,
   sendTurn,
@@ -117,6 +118,7 @@ export default function App() {
   const [warmupPhrase, setWarmupPhrase] = useState<KeyPhrase | null>(null);
   const [warmupIndex, setWarmupIndex] = useState(0);
   const [debrief, setDebrief] = useState<TurnResult | null>(null);
+  const [reviewsNote, setReviewsNote] = useState<string | null>(null);
   const [pitchAdvisory, setPitchAdvisory] = useState<PitchAdvisory | null>(null);
   const hintMaxRef = useRef<Record<string, number>>({});
   const sessionIdRef = useRef<string | null>(null);
@@ -139,6 +141,7 @@ export default function App() {
         setGoals([]);
         setPitchAdvisory(null);
         setDebrief(null);
+        setReviewsNote(null);
         setWarmupPhrase(null);
         setWarmupIndex(0);
         setCoach(null);
@@ -213,6 +216,7 @@ export default function App() {
       setWarmupPhrase(null);
       setWarmupIndex(0);
       setDebrief(null);
+      setReviewsNote(null);
       setPitchAdvisory(null);
       setLadder(createHintLadder(level, s.node_expects?.[0] ?? ""));
       setHintEpoch(0);
@@ -294,6 +298,19 @@ export default function App() {
     setBusy(true);
     try {
       applyTurn(await sendTurn(session.session_id, "", {}, { advance: "warmup" }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function addToReview() {
+    if (!session || busy) return;
+    setBusy(true);
+    try {
+      const body = await enrollReviews(session.session_id);
+      setReviewsNote(body.added > 0 ? "Added to review." : "Already in your review deck.");
+    } catch {
+      setReviewsNote("Couldn't add those to review.");
     } finally {
       setBusy(false);
     }
@@ -465,6 +482,8 @@ export default function App() {
             goals={checklist}
             corrections={corrections}
             pitchAdvisory={debrief.pitch_advisory ?? pitchAdvisory}
+            reviewsNote={reviewsNote}
+            onAddReviews={() => void addToReview()}
             onReplay={() => void restart("replay")}
             onBriefing={() => void restart("briefing")}
           />

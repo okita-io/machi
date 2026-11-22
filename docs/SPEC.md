@@ -43,9 +43,9 @@
 4. **Role-play** — Sora as staff; learner speaks; subtitles with furigana at hint level
 5. **Hint ladder** — silence, wrong move, or Help climbs one rung (lowers stars)
 6. **Coach timeouts** — understandable mistakes get in-character NPC reaction + coach note
-7. **Debrief** — after the closing node (`debrief: true` in the scenario flow), the turn returns `type: debrief` with stars, the required goals from `success.required`, and up to two tutor corrections (Japanese with furigana and romaji, plus English). That turn also writes the summary to SQLite. SRS deck updates come later. Replay and return-to-briefing reset the same session.
+7. **Debrief** — after the closing node (`debrief: true` in the scenario flow), the turn returns `type: debrief` with stars, the required goals from `success.required`, and up to two tutor corrections (Japanese with furigana and romaji, plus English). The two corrections are the highest weights (repeat misses plus hint climbs above the level default); a later phrase wins a tie. That turn writes the summary to SQLite and enrolls the session's correction cards in the FSRS deck. The debrief button "Add corrections to review" repeats that insert. Replay and return-to-briefing reset the same session and leave cards already in the deck.
 
-`schema_version` records the SQLite schema. v2 adds `stars`, `max_hint_rung`, and `completed` on `sessions`, and `hint_rung`, `correction_ja`, and `correction_en` on `attempts`. A v1 file (sessions and attempts only) is altered in place. Debrief stores stars, the completion flag, and the max hint rung on the session, and one `hint:{goal_id}` attempt row per goal for the per-goal peak. `GET /sessions/{id}/progress` returns that summary plus spoken attempts. `GET /sessions` lists saved sessions.
+`schema_version` records the SQLite schema. v2 adds `stars`, `max_hint_rung`, and `completed` on `sessions`, and `hint_rung`, `correction_ja`, and `correction_en` on `attempts`. A v1 file (sessions and attempts only) is altered in place. v3 adds `pitch_advisory` on attempts. v4 adds `corrections` (phrase, English, furigana in `kana_ruby`, romaji, scenario `srs_tags`, weight) and `cards` (FSRS state `new` / `learning` / `review`, due time, stability, difficulty, reps, lapses, last rating, and the copied tags). Debrief stores stars, the completion flag, and the max hint rung on the session, and one `hint:{goal_id}` attempt row per goal for the per-goal peak. `GET /sessions/{id}/progress` returns that summary plus spoken attempts. `GET /sessions` lists saved sessions.
 
 ### Scenarios
 
@@ -169,6 +169,12 @@ Goal checks: fuzzy `accept` lists first, then LLM judgment.
 The orchestrator calls `pron_reading` while it builds Sora's prompt (`Expected reading` in `tutor_user.md`). `PRON_URL` empty, or any error inside 1.5 s, becomes the word `unavailable` and the turn continues. When the learner turn includes audio, `pron_score` runs beside the NPC call and the JSON is stored on the attempt as `pitch_advisory` (schema v3). Stars still come only from hint climbs. The debrief shows one muted line when that JSON exists. The coach panel reads the same object.
 
 NPC and learner lines are enriched with furigana and romaji via text tools, not from the LLM. Furigana is per-token ruby from fugashi + unidic-lite (`ruby_for_text`). A scenario `npc_kana` value is an optional whole-line override, used only when the spoken text still matches the scripted line. Romaji is cutlet Hepburn for any Japanese, including kanji. The web subtitle shows that romaji row for both the NPC line and the learner line when the hint level is 2 or higher. The level control defaults to 2. cutlet, fugashi, and unidic-lite are default orchestrator dependencies. If those imports fail, the original text is kept.
+
+### Review deck (FSRS-4.5)
+
+Role-play stores a row whenever the tutor JSON includes `correction_ja` or `correction_en`. A warm-up miss stores the key phrase the same way (no extra LLM call). Weight is how many times that phrase was missed, plus hint-rung climbs above the level default. The same Japanese line updates one row instead of inserting a duplicate.
+
+Finishing the scenario inserts one card per correction row (`POST /sessions/{id}/reviews` does the same insert and is safe to repeat). Cards start in state `new`, due immediately, with the scenario `srs_tags` copied onto the card. `GET /reviews/next?limit=` returns due cards soonest first, including the phrase, furigana, romaji, and tags. `POST /reviews` body `{ "card_id", "rating" }` with rating `again`, `hard`, `good`, or `easy` runs the in-tree scheduler in `orchestrator/machi/fsrs.py` (stdlib and `math` only). Default weights are the MIT py-fsrs / fsrs4py FSRS-4.5 parameters. A first Good on a new card moves it to `review`. Again or Hard on a new card stays `learning`. Desired retention is 0.9 and intervals are not fuzzed.
 
 ## Milestones
 

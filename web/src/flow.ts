@@ -11,7 +11,7 @@ export type GoalStatus = {
   required: boolean;
 };
 
-export type CorrectionLike = { en?: string; ja?: string };
+export type CorrectionLike = { en?: string; ja?: string; weight?: number };
 
 export function turnKind(result: { type?: string; turn_type?: string }): string {
   if (result.turn_type) return result.turn_type;
@@ -39,9 +39,22 @@ export function requiredComplete(required: string[], completed: string[]): boole
   return required.length > 0 && required.every((id) => completed.includes(id));
 }
 
-/** Debrief keeps the latest two tutor corrections. */
+/**
+ * Debrief keeps two corrections. Higher weight (repeat misses and hint climbs)
+ * wins. Equal weights keep the later phrases, then those two stay in visit order.
+ */
 export function bestCorrections<T extends CorrectionLike>(items: T[]): T[] {
-  return items.filter((item) => (item.en || item.ja || "").trim()).slice(-2);
+  const usable = items.filter((item) => (item.en || item.ja || "").trim());
+  const ranked = usable
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => {
+      const byWeight = (b.item.weight ?? 0) - (a.item.weight ?? 0);
+      if (byWeight !== 0) return byWeight;
+      return b.index - a.index;
+    })
+    .slice(0, 2)
+    .sort((a, b) => a.index - b.index);
+  return ranked.map((row) => row.item);
 }
 
 /**

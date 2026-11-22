@@ -1,4 +1,4 @@
-"""Schema v3 migration and debrief progress rows."""
+"""Schema v4 migration and debrief progress rows."""
 
 from __future__ import annotations
 
@@ -168,6 +168,61 @@ def test_v2_database_gains_pitch_advisory(tmp_path):
     finally:
         conn.close()
     assert version == SCHEMA_VERSION
+
+
+def test_v3_database_gains_correction_and_card_tables(tmp_path):
+    path = tmp_path / "v3.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY,
+          scenario_id TEXT NOT NULL,
+          level INTEGER NOT NULL,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          stars INTEGER,
+          max_hint_rung INTEGER,
+          completed INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE attempts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          node_id TEXT,
+          utterance TEXT,
+          goal_hits TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+          hint_rung INTEGER,
+          correction_ja TEXT,
+          correction_en TEXT,
+          pitch_advisory TEXT
+        );
+        CREATE TABLE schema_version (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          version INTEGER NOT NULL
+        );
+        """
+    )
+    conn.execute("INSERT INTO schema_version (id, version) VALUES (1, 3)")
+    conn.execute(
+        "INSERT INTO sessions (id, scenario_id, level) VALUES ('sess-v3', 'restaurant_ramen_01', 1)"
+    )
+    conn.commit()
+    conn.close()
+
+    init_db(path)
+    conn = sqlite3.connect(path)
+    try:
+        version = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()[0]
+        names = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+        session = conn.execute("SELECT scenario_id FROM sessions WHERE id = 'sess-v3'").fetchone()
+    finally:
+        conn.close()
+    assert version == SCHEMA_VERSION
+    assert {"corrections", "cards"} <= names
+    assert session[0] == "restaurant_ramen_01"
 
 
 def test_fresh_database_is_v3_and_stores_attempt_corrections(tmp_path):

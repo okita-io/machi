@@ -182,8 +182,8 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M2-02 | [ ] | **Qwen3-ForcedAligner-0.6B** mora timestamps (async) | M2-01 | Scoring off critical path; results within **1–2 s** per spec |
 | M2-03 | [ ] | **japanese-hubert-base-phoneme-ctc-v4** actual phonemes | M2-01 | Compare learner ASR audio vs expected; advisory strip in UI |
 | M2-04 | [x] | F0 / pitch-accent advisory (librosa pyin) | M2-01 | No fail on accent alone |
-| M2-05 | [ ] | Correction cards in SQLite + debrief “best two” | M1-08, M2-01 | Phrases from tutor `correction` persisted |
-| M2-06 | [ ] | **FSRS** scheduling in SQLite | M2-05 | Due cards query; `srs_tags` from scenarios honored |
+| M2-05 | [x] | Correction cards in SQLite + debrief “best two” | M1-08, M2-01 | Phrases from tutor `correction` persisted |
+| M2-06 | [x] | **FSRS** scheduling in SQLite | M2-05 | Due cards query; `srs_tags` from scenarios honored |
 | M2-07 | [ ] | 2-minute spoken review mode (Sora mini-situation) | M2-06, M0-10 | End-to-end review session API |
 
 ---
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._
+_Last updated with M2-05 (weighted correction cards), M2-06 (FSRS-4.5), M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._

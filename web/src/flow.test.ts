@@ -30,7 +30,7 @@ test("required goals drive the debrief checklist", () => {
   assert.equal(requiredComplete(required, ["party_size", "order"]), false);
 });
 
-test("debrief keeps the latest two corrections", () => {
+test("equal weights keep the latest two corrections", () => {
   const cards = bestCorrections([
     { en: "one", ja: "一" },
     { en: "", ja: "" },
@@ -40,6 +40,18 @@ test("debrief keeps the latest two corrections", () => {
   assert.deepEqual(
     cards.map((card) => card.en),
     ["two", "three"],
+  );
+});
+
+test("a repeated miss outranks a single miss", () => {
+  const cards = bestCorrections([
+    { en: "same", ja: "二", weight: 2 },
+    { en: "solo-a", ja: "一", weight: 1 },
+    { en: "solo-b", ja: "三", weight: 1 },
+  ]);
+  assert.deepEqual(
+    cards.map((card) => card.en),
+    ["same", "solo-b"],
   );
 });
 

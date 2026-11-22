@@ -12,7 +12,7 @@ Full product and technical spec: [docs/SPEC.md](docs/SPEC.md).
 | Orchestrator | Python 3.12, FastAPI, WebSocket/REST, OpenAI SDK |
 | Text tools | [cutlet](https://github.com/polm/cutlet) romaji and fugashi + unidic-lite furigana (MIT / BSD), default in the orchestrator image. `npc_kana` in YAML is an optional whole-line override |
 | Scenario data | YAML + Pydantic validation |
-| Progress | SQLite file on `./data` volume (schema v3: stars, hint peaks, completion, pitch advisory) |
+| Progress | SQLite file on `./data` volume (schema v4: stars, hint peaks, completion, pitch advisory, correction cards, FSRS) |
 | CPU speech | `speech-cpu` mock ASR + stub WAV TTS |
 | GPU speech | `asr`, `tts` containers (stubs). `pron` is a CPU reading + F0 advisory service |
 | Assets | nginx static `./assets` |
@@ -180,7 +180,7 @@ docker-compose.yml
 | --- | --- |
 | Scenario schema + restaurant YAML | Real |
 | Flow / goal matching | Real |
-| SQLite session logging | Real. Debrief writes stars, completion, and per-goal hint peaks. `GET /sessions/{id}/progress` reads them back |
+| SQLite session logging | Real. Debrief writes stars, completion, per-goal hint peaks, and weighted correction cards. Completing a scenario adds those cards to the FSRS deck. `GET /sessions/{id}/progress` reads the summary back |
 | Romaji (cutlet) | Real for NPC and learner lines. The web UI shows the romaji row when the hint level is 2 or higher (selector defaults to 2) |
 | Furigana | Per-token ruby from fugashi + unidic-lite for any line. Scenario `npc_kana` overrides that reading when the spoken line still matches the script |
 | Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks and waits for `turn` |
@@ -193,7 +193,7 @@ docker-compose.yml
 | LLM | Live when `LLM_BASE_URL` set; else mock |
 | Lip flap and hint ladder | In the scene |
 | Briefing, warm-up, debrief | Sora briefing, one lenient attempt per key phrase, debrief after pay |
-| FSRS | Not yet (M2) |
+| FSRS | Real. In-tree FSRS-4.5 (`orchestrator/machi/fsrs.py`, no extra package). Completing a visit enrolls correction cards. `GET /reviews/next` lists due cards; `POST /reviews` rates again/hard/good/easy |
 
 ## Suggested next steps
 

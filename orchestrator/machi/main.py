@@ -9,6 +9,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -27,13 +28,19 @@ from machi.clients import (
 )
 from machi.config import settings
 from machi.db import (
+    enroll_corrections,
+    get_review_card,
     init_db,
     list_sessions,
+    next_due_cards,
     record_attempt,
+    record_correction,
     record_debrief,
     record_session,
+    save_card_review,
     session_progress,
 )
+from machi.fsrs import FsrsState, format_dt, parse_dt, schedule
 from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
 from machi.llm import LlmClient, render_prompt
 from machi.nlp import build_ruby_html, to_romaji
@@ -49,6 +56,9 @@ from machi.session import (
     advance_node,
     apply_warmup_attempt,
     begin_warmup,
+    best_corrections,
+    climbs_above_default,
+    coaching_goal_id,
     coaching_phrase,
     default_tutor_payload,
     evaluate_turn,
@@ -148,6 +158,11 @@ class TurnRequest(BaseModel):
 class SynthesizeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=400)
     voice: str = "guide"
+
+
+class ReviewRequest(BaseModel):
+    card_id: int = Field(ge=1)
+    rating: Literal["again", "hard", "good", "easy"]
 
 
 @app.get("/health")
@@ -262,6 +277,78 @@ async def get_session_progress(session_id: str) -> dict[str, Any]:
     if progress is None:
         raise HTTPException(status_code=404, detail="session not found")
     return progress
+
+
+@app.get("/reviews/next")
+async def reviews_next(limit: int = 20) -> dict[str, Any]:
+    """Due FSRS cards, soonest first, with the phrase and scenario tags."""
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limit must be positive")
+    now = format_dt(datetime.now(UTC))
+    cards = next_due_cards(Path(settings.db_path), now=now, limit=min(limit, 50))
+    return {"cards": cards}
+
+
+@app.post("/reviews")
+async def post_review(body: ReviewRequest) -> dict[str, Any]:
+    """Apply one FSRS-4.5 rating and store the next due time."""
+    path = Path(settings.db_path)
+    row = get_review_card(path, body.card_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    now = datetime.now(UTC)
+    reviewed = schedule(
+        FsrsState(
+            state=str(row["state"]),
+            stability=row["stability"],
+            difficulty=row["difficulty"],
+            reps=int(row["reps"] or 0),
+            lapses=int(row["lapses"] or 0),
+            last_review_at=parse_dt(row["last_review_at"]),
+        ),
+        body.rating,
+        now,
+    )
+    due_at = reviewed.due_at
+    stability = reviewed.stability
+    difficulty = reviewed.difficulty
+    reviewed_at = reviewed.last_review_at
+    last_rating = reviewed.last_rating
+    if (
+        due_at is None
+        or stability is None
+        or difficulty is None
+        or reviewed_at is None
+        or last_rating is None
+    ):
+        raise HTTPException(status_code=500, detail="review_failed")
+    save_card_review(
+        path,
+        body.card_id,
+        state=reviewed.state,
+        due_at=format_dt(due_at),
+        stability=stability,
+        difficulty=difficulty,
+        reps=reviewed.reps,
+        lapses=reviewed.lapses,
+        last_rating=last_rating,
+        last_review_at=format_dt(reviewed_at),
+    )
+    updated = get_review_card(path, body.card_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="card not found")
+    updated["interval_days"] = reviewed.interval_days
+    return updated
+
+
+@app.post("/sessions/{session_id}/reviews")
+async def enroll_session_reviews(session_id: str) -> dict[str, int]:
+    """Add this visit's corrections to the deck. Safe to repeat."""
+    path = Path(settings.db_path)
+    if session_progress(path, session_id) is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    due_at = format_dt(datetime.now(UTC))
+    return {"added": enroll_corrections(path, session_id, due_at=due_at)}
 
 
 @app.get("/sessions/{session_id}/coach")
@@ -420,12 +507,30 @@ async def _warmup_pipeline(
     timer.skip(STAGE_LLM)
     timer.skip(STAGE_TTS)
     attempt = apply_warmup_attempt(state, utterance)
-    return _warmup_status(
+    payload = _warmup_status(
         state,
         utterance=utterance,
         passed=bool(attempt["passed"]),
         attempt=attempt,
     )
+    phrase = attempt.get("phrase")
+    if attempt.get("passed") is False and phrase is not None:
+        item = remember_correction(
+            state,
+            {"correction_ja": phrase.ja, "correction_en": phrase.en},
+            learner_text=utterance,
+            goal_id="",
+            hint_climbs=0,
+            romaji=phrase.romaji,
+            kana=phrase.kana,
+        )
+        if item is not None:
+            coach = dict(payload["coach"])
+            coach["correction_ja"] = phrase.ja
+            coach["correction_en"] = phrase.en
+            coach["correction"] = phrase.ja
+            payload["coach"] = coach
+    return payload
 
 
 async def _hear_utterance(body: TurnRequest, timer: TurnLatency) -> str:
@@ -529,7 +634,20 @@ async def _session_turn_pipeline(
         if node_now.debrief:
             # The closing screen lists this turn's correction, so wait once.
             await tutor_task
-        coach, coach_pending = _take_coach(state.id, coach_gen, tutor_task, coach_fallback)
+        goal_for_card = coaching_goal_id(expected_ids, goal_hits)
+        climbs = 0
+        if goal_for_card:
+            rung = state.hint_peaks.get(goal_for_card, state.hint_rung)
+            climbs = climbs_above_default(state.level, rung)
+        coach, coach_pending = _take_coach(
+            state.id,
+            coach_gen,
+            tutor_task,
+            coach_fallback,
+            learner_text=utterance,
+            goal_id=goal_for_card,
+            hint_climbs=climbs,
+        )
         pitch_advisory = await _finish_pitch_score(score_task)
     except asyncio.CancelledError:
         _cancel_score_task(score_task)
@@ -595,6 +713,10 @@ def _take_coach(
     gen: int,
     task: asyncio.Task[dict[str, Any]],
     fallback: dict[str, Any],
+    *,
+    learner_text: str,
+    goal_id: str,
+    hint_climbs: int,
 ) -> tuple[dict[str, Any], bool]:
     """Return the tutor payload. Pending means NPC audio ships without waiting."""
 
@@ -603,27 +725,59 @@ def _take_coach(
             return
         if finished.exception() is not None:
             return
-        coach = finished.result()
-        LAST_COACH[session_id] = coach
-        found = SESSIONS.get(session_id)
-        if found is not None:
-            remember_correction(found, coach)
+        _accept_coach(
+            session_id,
+            finished.result(),
+            learner_text=learner_text,
+            goal_id=goal_id,
+            hint_climbs=hint_climbs,
+            write_db=True,
+        )
 
-    task.add_done_callback(_publish)
     if COACH_GEN.get(session_id) != gen:
         return fallback, False
     if not task.done():
+        task.add_done_callback(_publish)
         PENDING_COACH[session_id] = task
         return fallback, True
     PENDING_COACH.pop(session_id, None)
     if task.cancelled() or task.exception() is not None:
         return fallback, False
     coach = task.result()
+    _accept_coach(
+        session_id,
+        coach,
+        learner_text=learner_text,
+        goal_id=goal_id,
+        hint_climbs=hint_climbs,
+        write_db=False,
+    )
+    return coach, False
+
+
+def _accept_coach(
+    session_id: str,
+    coach: dict[str, Any],
+    *,
+    learner_text: str,
+    goal_id: str,
+    hint_climbs: int,
+    write_db: bool,
+) -> None:
     LAST_COACH[session_id] = coach
     found = SESSIONS.get(session_id)
-    if found is not None:
-        remember_correction(found, coach)
-    return coach, False
+    if found is None:
+        return
+    item = remember_correction(
+        found,
+        coach,
+        learner_text=learner_text,
+        goal_id=goal_id,
+        hint_climbs=hint_climbs,
+    )
+    # A tutor that finishes after the turn response still has to hit SQLite.
+    if item is not None and write_db:
+        _write_correction(found, item)
 
 
 @dataclass
@@ -634,7 +788,7 @@ class _FlowSnap:
     retries: int
     phase: str
     warmup_index: int
-    corrections: list[dict[str, str]]
+    corrections: list[dict[str, Any]]
     hint_peaks: dict[str, int]
 
 
@@ -730,6 +884,7 @@ def _persist_turn(state: SessionState, result: dict[str, Any]) -> None:
             correction_en=_optional_text(coach.get("correction_en")),
             pitch_advisory=_advisory_dict(result.get("pitch_advisory")),
         )
+    _flush_corrections(state)
     if result.get("type") == "debrief":
         peaks = {key: int(rung) for key, rung in state.hint_peaks.items()}
         max_rung = max([state.hint_rung, *peaks.values()])
@@ -740,6 +895,13 @@ def _persist_turn(state: SessionState, result: dict[str, Any]) -> None:
             completed=bool(result.get("complete")),
             hint_peaks=peaks,
             max_hint_rung=max_rung,
+        )
+        # Completing the visit adds every stored correction. The debrief button
+        # calls the same insert and is a no-op once these rows exist.
+        result["reviews_added"] = enroll_corrections(
+            path,
+            state.id,
+            due_at=format_dt(datetime.now(UTC)),
         )
 
 
@@ -792,19 +954,52 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
-def _correction_cards(state: SessionState) -> list[dict[str, str]]:
-    cards: list[dict[str, str]] = []
-    for item in state.corrections[-2:]:
-        ja = item.get("ja") or ""
+def _correction_cards(state: SessionState) -> list[dict[str, Any]]:
+    cards: list[dict[str, Any]] = []
+    for item in best_corrections(state.corrections):
+        ja = str(item.get("ja") or "")
+        romaji = str(item.get("romaji") or "")
+        ruby = str(item.get("kana_ruby") or "")
+        if ja and not romaji:
+            romaji = to_romaji(ja)
+        if ja and not ruby:
+            ruby = build_ruby_html(ja, None)
         cards.append(
             {
-                "en": item.get("en") or "",
+                "en": str(item.get("en") or ""),
                 "ja": ja,
-                "romaji": to_romaji(ja) if ja else "",
-                "ruby_html": build_ruby_html(ja, None) if ja else "",
+                "romaji": romaji,
+                "ruby_html": ruby,
+                "weight": int(item.get("weight") or 0),
             }
         )
     return cards
+
+
+def _write_correction(state: SessionState, item: dict[str, Any]) -> None:
+    tags = item.get("srs_tags") or []
+    if isinstance(tags, str):
+        tag_list = [part for part in tags.split(",") if part]
+    else:
+        tag_list = [str(part) for part in tags if str(part)]
+    record_correction(
+        Path(settings.db_path),
+        session_id=state.id,
+        scenario_id=state.scenario.id,
+        goal_id=str(item.get("goal_id") or ""),
+        learner_text=str(item.get("learner_text") or ""),
+        correction_ja=str(item.get("ja") or ""),
+        correction_en=str(item.get("en") or ""),
+        kana_ruby=str(item.get("kana_ruby") or ""),
+        romaji=str(item.get("romaji") or ""),
+        srs_tags=tag_list,
+        weight=int(item.get("weight") or 0),
+    )
+
+
+def _flush_corrections(state: SessionState) -> None:
+    for item in state.corrections:
+        _write_correction(state, item)
 
 
 def _decode_audio_b64(audio_b64: str) -> bytes:

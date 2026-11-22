@@ -24,16 +24,15 @@ export async function createSession(scenarioId: string, level = 1): Promise<Sess
   return r.json();
 }
 
-export async function sendTurn(
-  sessionId: string,
-  text: string,
-): Promise<{
+export type TurnResult = {
   learner_text: string;
   npc: NpcLine;
   coach: { coach_note_en: string; goal_hits: string[] };
   tts_audio_b64: string;
   completed_goals: string[];
-}> {
+};
+
+export async function sendTurn(sessionId: string, text: string): Promise<TurnResult> {
   const r = await fetch(`${API_BASE}/sessions/${sessionId}/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

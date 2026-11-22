@@ -10,6 +10,7 @@ export default defineConfig({
       "/api": {
         target: process.env.VITE_ORCHESTRATOR_URL || "http://localhost:8100",
         changeOrigin: true,
+        ws: true,
         rewrite: (p) => p.replace(/^\/api/, ""),
       },
     },

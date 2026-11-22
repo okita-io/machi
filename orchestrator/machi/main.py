@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from starlette.websockets import WebSocketDisconnected
 
 from machi.clients import synthesize, transcribe
 from machi.config import settings
@@ -26,6 +28,7 @@ from machi.session import (
     evaluate_turn,
     new_session,
 )
+from machi.ws_audio import PCM_FRAME_BYTES, SessionAudioBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -202,21 +205,126 @@ def enrich_line(text_ja: str, kana: str | None) -> dict[str, str]:
     }
 
 
+def _ws_bool(value: object) -> bool:
+    return value is True
+
+
+async def _ws_pcm_frame(websocket: WebSocket, buf: SessionAudioBuffer, payload: bytes) -> None:
+    if len(payload) != PCM_FRAME_BYTES:
+        await websocket.send_json(
+            {
+                "type": "audio_ack",
+                "frames": buf.frames,
+                "event": "frame",
+                "accepted": False,
+                "bytes": len(payload),
+            }
+        )
+        return
+    accepted = buf.append(payload)
+    await websocket.send_json(
+        {
+            "type": "audio_ack",
+            "frames": buf.frames,
+            "event": "frame",
+            "accepted": accepted,
+            "bytes": PCM_FRAME_BYTES,
+        }
+    )
+
+
+async def _ws_turn(
+    websocket: WebSocket,
+    session_id: str,
+    buf: SessionAudioBuffer,
+    data: dict[str, Any],
+) -> None:
+    text = data.get("text") if isinstance(data.get("text"), str) else None
+    if text == "":
+        text = None
+    audio_b64 = data.get("audio_b64") if isinstance(data.get("audio_b64"), str) else None
+    # Typed text keeps the existing turn path. Otherwise use this socket's PCM.
+    if text:
+        buf.clear()
+        audio_b64 = None
+    elif audio_b64:
+        buf.clear()
+    else:
+        audio_b64 = buf.take_b64()
+    try:
+        result = await session_turn(
+            session_id,
+            TurnRequest(text=text, audio_b64=audio_b64),
+            Response(),
+        )
+    except Exception:
+        logger.exception("websocket turn failed session=%s", session_id)
+        await websocket.send_json({"type": "error", "detail": "turn_failed"})
+        return
+    await websocket.send_json({"type": "turn_result", **result})
+
+
+async def _ws_control(
+    websocket: WebSocket,
+    session_id: str,
+    buf: SessionAudioBuffer,
+    raw: str,
+) -> None:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        await websocket.send_json({"type": "error", "detail": "invalid_json"})
+        return
+    if not isinstance(data, dict):
+        await websocket.send_json({"type": "error", "detail": "expected_object"})
+        return
+    kind = data.get("type")
+    if kind == "audio_start":
+        buf.start(hands_free=_ws_bool(data.get("hands_free")))
+        await websocket.send_json(
+            {
+                "type": "audio_ack",
+                "frames": buf.frames,
+                "event": "audio_start",
+                "hands_free": buf.hands_free,
+            }
+        )
+        return
+    if kind == "audio_stop":
+        frames = buf.stop()
+        await websocket.send_json(
+            {
+                "type": "audio_ack",
+                "frames": frames,
+                "event": "audio_stop",
+                "bytes": len(buf.pcm),
+            }
+        )
+        return
+    if kind == "turn":
+        await _ws_turn(websocket, session_id, buf, data)
+        return
+    await websocket.send_json({"type": "error", "detail": "unknown_type"})
+
+
 @app.websocket("/ws/{session_id}")
 async def ws_session(websocket: WebSocket, session_id: str) -> None:
+    """JSON control events plus 640-byte PCM frames. Replies are JSON only."""
     await websocket.accept()
     if session_id not in SESSIONS:
         await websocket.close(code=4404)
         return
+    buf = SessionAudioBuffer()
     try:
         while True:
-            data = await websocket.receive_json()
-            if data.get("type") == "turn":
-                req = TurnRequest(
-                    text=data.get("text"),
-                    audio_b64=data.get("audio_b64"),
-                )
-                result = await session_turn(session_id, req, Response())
-                await websocket.send_json({"type": "turn_result", **result})
-    except WebSocketDisconnect:
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                return
+            payload = message.get("bytes")
+            raw = message.get("text")
+            if payload is not None:
+                await _ws_pcm_frame(websocket, buf, payload)
+            elif raw is not None:
+                await _ws_control(websocket, session_id, buf, raw)
+    except (WebSocketDisconnect, WebSocketDisconnected):
         return

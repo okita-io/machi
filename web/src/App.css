@@ -126,6 +126,37 @@ header h1 {
   color: #fff;
 }
 
+.mic-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  align-items: flex-start;
+}
+
+.input-bar .mic-button {
+  background: #2b8a3e;
+  min-width: 8.5rem;
+  touch-action: none;
+}
+
+.input-bar .mic-button.live {
+  background: #c92a2a;
+}
+
+.mic-check {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.mic-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  opacity: 0.85;
+  max-width: 14rem;
+}
+
 .loading {
   color: #fff;
   padding: 2rem;

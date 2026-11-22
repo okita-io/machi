@@ -72,6 +72,8 @@ SCENARIOS_PATH=../scenarios DB_PATH=../data/machi.sqlite \
 cd web && npm install && npm run dev
 ```
 
+The dev UI logs each captured PCM frame in the browser console. Set `VITE_LOG_PCM_FRAMES=0` to turn that off. Production builds do not log frames. The mic works on localhost or HTTPS.
+
 ## Repository layout
 
 ```
@@ -94,7 +96,8 @@ docker-compose.yml
 | SQLite session logging | Real (minimal) |
 | Romaji (cutlet) | Real |
 | Furigana | From scenario kana in demo; fugashi/pyopenjtalk in M1 |
-| Mic / VAD / WebSocket audio | UI uses typed text; WS route exists |
+| Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks. VAD not yet |
+| Hands-free checkbox | Flag on `audio_start` only (no auto end-of-turn) |
 | ASR / TTS (CPU) | Mock / stub WAV |
 | ASR / TTS / pron (GPU) | Health stubs |
 | LLM | Live when `LLM_BASE_URL` set; else mock |
@@ -102,7 +105,7 @@ docker-compose.yml
 
 ## Suggested next steps
 
-1. **M0** — Wire Silero VAD + browser mic → orchestrator WebSocket PCM frames.
+1. **M0** — Silero VAD on the PCM frames already sent over the session WebSocket.
 2. **GPU ASR/TTS** — Implement `asr` and `tts` services with Qwen3 or Kokoro on the `cpu`/`spark` profiles.
 3. **M1** — Hint ladder UI, coach drawer, debrief screen, fugashi + unidic-lite furigana for any line.
 4. **Assets** — ComfyUI bake script for WebP backgrounds and Sora expression sheet.

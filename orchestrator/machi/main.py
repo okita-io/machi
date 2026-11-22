@@ -202,7 +202,13 @@ async def health() -> dict[str, Any]:
 
 
 def _asset_url(path: str) -> str:
-    return f"{settings.assets_base_url.rstrip('/')}/{path.lstrip('/')}"
+    base = settings.assets_base_url.rstrip("/")
+    rel = path.lstrip("/")
+    if not base or base == "/assets":
+        return f"/assets/{rel}"
+    if base.startswith("/"):
+        return f"{base}/{rel}"
+    return f"{base}/{rel}"
 
 
 def _guide_sprite(spec: ScenarioSpec) -> str:

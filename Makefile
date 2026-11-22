@@ -1,7 +1,15 @@
-.PHONY: up-cpu down test lint e2e-latency
+.PHONY: up-cpu up-rtx3090 up-rtx3090-https down test lint e2e-latency
 
 up-cpu:
 	docker compose --profile cpu up --build
+
+# On the RTX 3090 host. Requires .env from .env.rtx3090.example
+up-rtx3090:
+	docker compose --env-file .env --profile rtx3090 up --build
+
+# Tailscale / remote mic — run make_lan_https.sh first
+up-rtx3090-https:
+	docker compose --env-file .env --profile rtx3090 --profile https up --build
 
 down:
 	docker compose --profile cpu down

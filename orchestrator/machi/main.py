@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import logging
 from contextlib import asynccontextmanager
@@ -14,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnected
 
-from machi.clients import synthesize, transcribe
+from machi.clients import SpeechError, synthesize, transcribe
 from machi.config import settings
 from machi.db import init_db, record_attempt, record_session
 from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
@@ -129,17 +130,21 @@ async def session_turn(
         raise HTTPException(status_code=404, detail="session not found")
 
     timer = TurnLatency()
-    utterance = body.text or ""
-    if body.audio_b64 and not utterance:
-        audio = base64.b64decode(body.audio_b64)
-        with timer.measure(STAGE_ASR):
-            utterance = await transcribe(audio_pcm=audio)
-    elif not utterance:
-        with timer.measure(STAGE_ASR):
-            utterance = await transcribe(text_override="")
-    else:
-        # Typed text does not call ASR. Omit a zero duration.
-        timer.skip(STAGE_ASR)
+    # Blank text is not a typed turn, so audio_b64 alone still reaches ASR.
+    utterance = (body.text or "").strip()
+    try:
+        if body.audio_b64 and not utterance:
+            pcm = _decode_audio_b64(body.audio_b64)
+            with timer.measure(STAGE_ASR):
+                utterance = await transcribe(audio_pcm=pcm)
+        elif not utterance:
+            with timer.measure(STAGE_ASR):
+                utterance = await transcribe(text_override="")
+        else:
+            # Typed text does not call ASR. Omit a zero duration.
+            timer.skip(STAGE_ASR)
+    except SpeechError as exc:
+        raise _speech_unavailable(exc) from exc
 
     prev_node_id = state.node_id
     goal_hits, success = evaluate_turn(state, utterance)
@@ -172,8 +177,11 @@ async def session_turn(
         npc_ja = await LLM.npc_reply(system=npc_system, user=npc_user, fallback_line=npc_ja)
         coach = await LLM.tutor_json(system=tutor_system, user=tutor_user, fallback=coach)
 
-    with timer.measure(STAGE_TTS):
-        audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
+    try:
+        with timer.measure(STAGE_TTS):
+            audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
+    except SpeechError as exc:
+        raise _speech_unavailable(exc) from exc
     for key, value in timer.header_map().items():
         response.headers[key] = value
     timer.emit(session_id=session_id)
@@ -195,6 +203,17 @@ async def session_turn(
         "tts_audio_b64": base64.b64encode(audio).decode("ascii"),
         "completed_goals": sorted(state.completed_goals),
     }
+
+
+def _decode_audio_b64(audio_b64: str) -> bytes:
+    try:
+        return base64.b64decode(audio_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="invalid audio_b64") from exc
+
+
+def _speech_unavailable(exc: SpeechError) -> HTTPException:
+    return HTTPException(status_code=502, detail=f"{exc.service}_unavailable")
 
 
 def enrich_line(text_ja: str, kana: str | None) -> dict[str, str]:
@@ -257,6 +276,10 @@ async def _ws_turn(
             TurnRequest(text=text, audio_b64=audio_b64),
             Response(),
         )
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else "turn_failed"
+        await websocket.send_json({"type": "error", "detail": detail})
+        return
     except Exception:
         logger.exception("websocket turn failed session=%s", session_id)
         await websocket.send_json({"type": "error", "detail": "turn_failed"})

@@ -97,6 +97,7 @@ docker-compose.yml
 | Romaji (cutlet) | Real |
 | Furigana | From scenario kana in demo; fugashi/pyopenjtalk in M1 |
 | Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks. VAD not yet |
+| Turn pipeline | Audio-only `audio_b64` (REST or WebSocket) runs ASR → LLM → TTS. Typed text skips ASR |
 | Hands-free checkbox | Flag on `audio_start` only (no auto end-of-turn) |
 | ASR / TTS (CPU) | Mock / stub WAV |
 | ASR / TTS / pron (GPU) | Health stubs |

@@ -135,7 +135,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | --- | --- | --- | --- | --- |
 | M0-01 | [x] | Browser mic: AudioWorklet 16 kHz PCM, push-to-talk + optional hands-free flag | — | `web/src/audio/` captures mic on localhost/https; frames logged in dev |
 | M0-02 | [x] | WebSocket binary PCM + JSON events to orchestrator | M0-01, S0-03 | Client sends 20 ms frames; server acks; integration test with fake PCM |
-| M0-03 | [ ] | Orchestrator wires turn pipeline: audio → ASR URL → LLM → TTS URL | S0-08 | `session_turn` uses ASR for audio_b64; no typed-only requirement |
+| M0-03 | [x] | Orchestrator wires turn pipeline: audio → ASR URL → LLM → TTS URL | S0-08 | `session_turn` uses ASR for audio_b64; no typed-only requirement |
 | M0-04 | [ ] | **Silero VAD** (onnx, CPU) in orchestrator or `speech-cpu` | M0-02 | End-of-utterance within **500 ms** silence ceiling per spec |
 | M0-05 | [ ] | **Smart Turn v3** (BSD-2, CPU) after VAD | M0-04 | Turn-end reduces false cuts on learner pauses; push-to-talk bypass documented |
 | M0-06 | [ ] | **Qwen3-ASR-0.6B** streaming in `asr/` (`spark` profile) | S0-09, GPU | `POST /v1/transcribe` returns Japanese text; warm-start &lt; 3 s; streaming partials optional v0 |
@@ -273,4 +273,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M0-01 and M0-02 (browser mic + WebSocket PCM). Scaffold baseline remains PR #1._
+_Last updated with M0-03 (audio-only turn: ASR → LLM → TTS). Scaffold baseline remains PR #1._

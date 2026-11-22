@@ -97,6 +97,8 @@ WebSocket carries 16 kHz PCM frames on LAN (push-to-talk fallback for v1).
 
 The browser captures mono audio with an AudioWorklet and sends **20 ms** Int16 frames (640 bytes) as binary WebSocket messages. JSON control events are `audio_start` (optional `hands_free`), `audio_stop`, and `turn`. The server replies with JSON only, including `{type: "audio_ack", frames: N}`. A `turn` without `text` runs the existing turn pipeline on PCM accumulated for that socket (`audio_b64`). A `turn` with `text` stays on the typed path. `npm run dev` logs each frame; set `VITE_LOG_PCM_FRAMES=0` to silence that. The hands-free checkbox is forwarded on `audio_start` and does not end the turn until VAD (M0-04). Microphone capture requires localhost or HTTPS.
 
+`POST /sessions/{id}/turn` accepts `{ "audio_b64": "<pcm>" }` with no `text`. The orchestrator decodes that PCM, transcribes it at `ASR_URL` (`POST /v1/transcribe`), runs the NPC and tutor LLM calls on the transcript, then synthesizes the NPC line at `TTS_URL`. The JSON response includes `learner_text`, `npc.ja`, `npc.romaji`, and `tts_audio_b64`. A WebSocket `turn` that carries only `audio_b64` (or buffered PCM and no `text`) uses the same pipeline. Typed `text` still skips ASR. Blank `text` does not count as a typed turn.
+
 Each turn logs one JSON line (`event: turn_latency`) with `stages_ms` for ASR, LLM, and TTS. HTTP `POST /sessions/{id}/turn` also sets `X-Latency-ASR`, `X-Latency-LLM`, and `X-Latency-TTS` (milliseconds). A stage that did not run — typed text skips ASR — is `null` in the log and its header is omitted.
 
 ## Docker profiles

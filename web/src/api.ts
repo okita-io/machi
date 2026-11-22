@@ -102,6 +102,41 @@ export async function listScenarios(): Promise<ScenarioSummary[]> {
   return r.json();
 }
 
+export type ScenarioIssue = {
+  path: string;
+  message: string;
+  line: number | null;
+};
+
+export async function fetchScenarioYaml(id: string): Promise<string> {
+  const r = await fetch(`${API_BASE}/scenarios/${encodeURIComponent(id)}/raw`);
+  if (!r.ok) throw new Error(await r.text());
+  const body = (await r.json()) as { yaml?: string };
+  if (typeof body.yaml !== "string") throw new Error("empty scenario");
+  return body.yaml;
+}
+
+export async function validateScenario(
+  yaml: string,
+): Promise<{ ok: boolean; id?: string; errors: ScenarioIssue[] }> {
+  const r = await fetch(`${API_BASE}/scenarios/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ yaml }),
+  });
+  const body = (await r.json()) as { ok?: boolean; id?: string; errors?: ScenarioIssue[] };
+  if (r.status !== 200 && r.status !== 422) throw new Error(JSON.stringify(body));
+  return {
+    ok: Boolean(body.ok),
+    id: body.id,
+    errors: (body.errors ?? []).map((err) => ({
+      path: err.path,
+      message: err.message,
+      line: err.line ?? null,
+    })),
+  };
+}
+
 export async function createSession(scenarioId: string, level = 1): Promise<SessionStart> {
   const r = await fetch(`${API_BASE}/sessions`, {
     method: "POST",

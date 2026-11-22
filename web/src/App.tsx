@@ -45,14 +45,17 @@ import { ReviewPanel } from "./review";
 import { advisoryLine, type PitchAdvisory } from "./pitchAdvisory";
 import { type SoraExpression, soraSpriteUrl } from "./soraExpressions";
 import { townMapUrl } from "./townMap";
+import { EditorView } from "./EditorView";
 import { TownView } from "./TownView";
 import { useViewport } from "./useViewport";
 import "./App.css";
 
-type AppRoute = "town" | "play";
+type AppRoute = "town" | "play" | "editor";
 
 function routeFromHash(): AppRoute {
-  return window.location.hash === "#/town" ? "town" : "play";
+  if (window.location.hash === "#/town") return "town";
+  if (window.location.hash === "#/editor") return "editor";
+  return "play";
 }
 
 function useHashRoute(): AppRoute {
@@ -420,6 +423,10 @@ export default function App() {
     if (window.location.hash !== "#/play") window.location.hash = "#/play";
   }
 
+  function openEditor() {
+    if (window.location.hash !== "#/editor") window.location.hash = "#/editor";
+  }
+
   const nav = (
     <nav className="view-nav" aria-label="Views">
       <button type="button" className={route === "town" ? "active" : ""} onClick={openTown}>
@@ -428,8 +435,24 @@ export default function App() {
       <button type="button" className={route === "play" ? "active" : ""} onClick={() => openScene()}>
         Scene
       </button>
+      <button type="button" className={route === "editor" ? "active" : ""} onClick={openEditor}>
+        Editor
+      </button>
     </nav>
   );
+
+  if (route === "editor") {
+    return (
+      <div className={appClass(false, phone)} data-viewport={phone ? "phone" : "wide"}>
+        <header>
+          <h1>Machi</h1>
+          <span className="badge">CPU demo</span>
+          {nav}
+        </header>
+        <EditorView />
+      </div>
+    );
+  }
 
   if (route === "town") {
     const mapUrl = catalog?.[0]?.scene.background ? townMapUrl(catalog[0].scene.background) : "";

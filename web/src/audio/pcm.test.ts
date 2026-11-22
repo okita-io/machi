@@ -80,6 +80,14 @@ test("session websocket url stays on the page host", () => {
     }),
     "ws://localhost:8100/ws/abc",
   );
+  assert.equal(
+    buildSessionWsUrl("abc", {
+      apiBase: "https://machi.local",
+      protocol: "https:",
+      host: "machi.local",
+    }),
+    "wss://machi.local/ws/abc",
+  );
 });
 
 test("pcm chunks become standard base64", () => {

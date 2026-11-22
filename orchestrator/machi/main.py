@@ -15,6 +15,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnected
 
@@ -54,7 +55,7 @@ from machi.review import (
     record_grade,
     review_payload,
 )
-from machi.scenario_loader import load_all_scenarios
+from machi.scenario_loader import load_scenario_bundle, validate_scenario_text
 from machi.schema import ScenarioSpec
 from machi.session import (
     PHASE_BRIEFING,
@@ -99,6 +100,7 @@ from machi.ws_audio import PCM_FRAME_BYTES, SessionAudioBuffer
 logger = logging.getLogger(__name__)
 
 SCENARIOS: dict = {}
+SCENARIO_YAML: dict[str, str] = {}
 SESSIONS: dict[str, SessionState] = {}
 REVIEWS: dict[str, ReviewSession] = {}
 LLM = LlmClient()
@@ -140,8 +142,8 @@ class _WsSink:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scenarios_dir = Path(settings.scenarios_path)
-    global SCENARIOS
-    SCENARIOS = load_all_scenarios(scenarios_dir)
+    global SCENARIOS, SCENARIO_YAML
+    SCENARIOS, SCENARIO_YAML = load_scenario_bundle(scenarios_dir)
     init_db(Path(settings.db_path))
     logger.info("Loaded %s scenarios", len(SCENARIOS))
     yield
@@ -155,6 +157,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class ValidateScenarioRequest(BaseModel):
+    yaml: str
 
 
 class CreateSessionRequest(BaseModel):
@@ -218,6 +224,23 @@ async def list_scenarios() -> list[dict[str, Any]]:
         }
         for s in SCENARIOS.values()
     ]
+
+
+@app.post("/scenarios/validate")
+async def validate_scenario(body: ValidateScenarioRequest) -> JSONResponse:
+    """Parse YAML with the scenario schema. Never writes a file."""
+    spec, errors = validate_scenario_text(body.yaml)
+    if spec is None:
+        return JSONResponse(status_code=422, content={"ok": False, "errors": errors})
+    return JSONResponse(status_code=200, content={"ok": True, "id": spec.id, "errors": []})
+
+
+@app.get("/scenarios/{scenario_id}/raw")
+async def get_scenario_raw(scenario_id: str) -> dict[str, str]:
+    text = SCENARIO_YAML.get(scenario_id)
+    if text is None:
+        raise HTTPException(status_code=404, detail="scenario not found")
+    return {"id": scenario_id, "yaml": text}
 
 
 @app.get("/scenarios/{scenario_id}")

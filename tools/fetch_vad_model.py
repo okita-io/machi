@@ -34,9 +34,7 @@ def default_dest() -> Path:
 def _looks_like_onnx(payload: bytes) -> bool:
     if len(payload) < MIN_BYTES:
         return False
-    if payload.lstrip().startswith((b"<", b"{", b"version https://git-lfs")):
-        return False
-    return True
+    return not payload.lstrip().startswith((b"<", b"{", b"version https://git-lfs"))
 
 
 def fetch(dest: Path, url: str = SILERO_URL) -> Path:

@@ -22,8 +22,8 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "orchestrator"))
 
-from machi.npc_audio import fixed_npc_lines, write_manifest  # noqa: E402
-from machi.scenario_loader import load_all_scenarios  # noqa: E402
+from machi.npc_audio import fixed_npc_lines, write_manifest
+from machi.scenario_loader import load_all_scenarios
 
 
 def synthesize(tts_url: str, text: str, voice: str) -> bytes:

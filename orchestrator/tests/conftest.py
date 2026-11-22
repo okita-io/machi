@@ -31,6 +31,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "accent: beginner-phrase ASR fixtures; skipped unless ASR_URL answers /health",
     )
+    config.addinivalue_line(
+        "markers",
+        "pron_model: OpenJTalk dictionary and librosa.pyin; skip if the dictionary is missing",
+    )
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

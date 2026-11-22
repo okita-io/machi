@@ -1,3 +1,5 @@
+import type { PitchAdvisory } from "./pitchAdvisory";
+
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 export type NpcLine = {
@@ -71,6 +73,7 @@ export type CoachPayload = {
   sora_expression?: string;
   understandable?: boolean;
   pronunciation_tip_en?: string | null;
+  pitch_advisory?: PitchAdvisory | null;
 };
 
 export type TurnResult = {
@@ -93,6 +96,7 @@ export type TurnResult = {
   goals_completed?: string[];
   corrections?: CorrectionCard[];
   complete?: boolean;
+  pitch_advisory?: PitchAdvisory | null;
   warmup_index?: number;
   warmup_total?: number;
   warmup_passed?: boolean | null;

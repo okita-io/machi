@@ -35,11 +35,13 @@ def test_templates_fill_placeholders():
             "expected_goals": "party_size",
             "hint_rung": 1,
             "accepted": "true",
+            "expected_reading": "フタリデス accent 0 pitch L-H-H-H-H",
         },
     )
     assert "ramen staff" in system and "polite_service" in system
     assert "{{" not in system and "{{" not in user and "{{" not in tutor
     assert "ふたりです" in user and "ふたりです" in tutor
+    assert "フタリデス" in tutor and "accent 0" in tutor
     assert render_prompt("coach_note_success.md", {}) == "Nice!"
     assert "key phrase" in render_prompt("coach_note_retry.md", {})
     heard = render_prompt("coach_note_warmup_miss.md", {"phrase_en": "Two people."})

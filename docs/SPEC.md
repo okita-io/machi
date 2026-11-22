@@ -101,7 +101,7 @@ flowchart LR
 | orchestrator | Python FastAPI, asyncio, OpenAI SDK |
 | asr | Qwen3-ASR or faster-whisper (GPU profiles) |
 | tts | Qwen3-TTS / Irodori / Kokoro |
-| pron | Aligner + phoneme CTC (async scoring) |
+| pron | CPU pyopenjtalk readings + librosa.pyin F0 advisory. Aligner and phoneme CTC come later |
 | assets | Static scenario art and sprites |
 | db | SQLite on a volume |
 
@@ -156,6 +156,14 @@ Prompt text lives in `orchestrator/prompts/` (`npc_system.md`, `npc_user.md`, `t
 
 Goal checks: fuzzy `accept` lists first, then LLM judgment.
 
+### Pronunciation (advisory)
+
+`pron/` is a CPU FastAPI service. `POST /reading` with `{text}` returns katakana, accent type, and a per-mora H/L pattern from **pyopenjtalk** full-context labels (`/F:` accent position, `/A:` mora index). OpenJTalk's heiban (平板) is accent position equal to the mora count; the API reports that as accent type 0. The package is MIT and OpenJTalk plus its dictionary are Modified BSD. **pyopenjtalk-plus is not used.** Those labels already carry the expected reading, so the plus fork and the optional `marine` accent model are unnecessary. `pron/scripts/fetch_dict.sh` downloads the dictionary at image build (`OPEN_JTALK_DICT_DIR` inside the wheel) so the first request does not need the network.
+
+`POST /f0` accepts 16 kHz mono PCM16 as a WAV or raw bytes (`audio_b64`) and returns `frames_hz`, `voiced_ratio`, and `mean_f0` from **librosa.pyin** (ISC). No torch. `POST /score` slices that F0 track across the expected moras and labels each mora `flat`, `rising`, or `dropping`, then `ok`, `low`, or `high`. The body always includes `is_advisory: true` and `blocks_turn: false`. Equal-time slices are a stand-in until forced alignment.
+
+The orchestrator calls `pron_reading` while it builds Sora's prompt (`Expected reading` in `tutor_user.md`). `PRON_URL` empty, or any error inside 1.5 s, becomes the word `unavailable` and the turn continues. When the learner turn includes audio, `pron_score` runs beside the NPC call and the JSON is stored on the attempt as `pitch_advisory` (schema v3). Stars still come only from hint climbs. The debrief shows one muted line when that JSON exists. The coach panel reads the same object.
+
 NPC and learner lines are enriched with furigana and romaji via text tools, not from the LLM. Furigana is per-token ruby from fugashi + unidic-lite (`ruby_for_text`). A scenario `npc_kana` value is an optional whole-line override, used only when the spoken text still matches the scripted line. Romaji is cutlet Hepburn for any Japanese, including kanji. The web subtitle shows that romaji row for both the NPC line and the learner line when the hint level is 2 or higher. The level control defaults to 2. cutlet, fugashi, and unidic-lite are default orchestrator dependencies. If those imports fail, the original text is kept.
 
 ## Milestones
@@ -174,3 +182,5 @@ This repository PR targets the **scaffold + walking skeleton** toward M0/M1: CPU
 ## License watch
 
 Avoid in default stack: pykakasi (GPL), Fish Speech / F5-TTS / Style-Bert-VITS2 (NC/AGPL), and other NC models listed in the full product spec source canvas.
+
+Pronunciation uses pyopenjtalk (MIT) and OpenJTalk (Modified BSD), plus librosa (ISC) and its BSD numeric stack. No GPL or non-commercial weights.

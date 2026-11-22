@@ -50,6 +50,13 @@ header h1 {
   color: #ffd43b;
 }
 
+.pitch-advisory {
+  margin: 0.35rem 0 0.6rem;
+  color: #a8b0c4;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .level-control {
   margin-left: auto;
   display: flex;

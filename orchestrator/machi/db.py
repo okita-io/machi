@@ -1,17 +1,21 @@
 """SQLite progress store.
 
-Schema v2 is applied by ``init_db``. Databases created before versioning (v1
-sessions + attempts only) are altered in place. Debrief writes session stars,
+Schema v3 is applied by ``init_db``. Databases created before versioning (v1
+sessions + attempts only) are altered in place, then v2 hint columns and the
+v3 ``pitch_advisory`` JSON column are added. Debrief writes session stars,
 completion, and the max hint rung, plus one ``hint:{goal_id}`` attempt row per
-goal so per-goal peaks survive in the attempt columns.
+goal so per-goal peaks survive in the attempt columns. Pitch advice is stored
+on the spoken attempt and never changes stars.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
+from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Historical v1 DDL. Kept so migrations and tests share one literal.
 V1_SCHEMA_SQL = """
@@ -54,7 +58,7 @@ def init_db(path: Path) -> None:
             _create_current_tables(conn)
             _write_version(conn, SCHEMA_VERSION)
         elif version is None or version < SCHEMA_VERSION:
-            _migrate_v1_to_v2(conn)
+            _migrate_to_current(conn, version)
             _write_version(conn, SCHEMA_VERSION)
         conn.commit()
     finally:
@@ -89,14 +93,19 @@ def record_attempt(
     hint_rung: int | None = None,
     correction_ja: str | None = None,
     correction_en: str | None = None,
+    pitch_advisory: dict[str, Any] | None = None,
 ) -> None:
+    advisory = None
+    if pitch_advisory is not None:
+        advisory = json.dumps(pitch_advisory, ensure_ascii=False)
     conn = sqlite3.connect(path)
     try:
         conn.execute(
             """
             INSERT INTO attempts (
-              session_id, node_id, utterance, goal_hits, hint_rung, correction_ja, correction_en
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+              session_id, node_id, utterance, goal_hits,
+              hint_rung, correction_ja, correction_en, pitch_advisory
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -106,6 +115,7 @@ def record_attempt(
                 hint_rung,
                 correction_ja,
                 correction_en,
+                advisory,
             ),
         )
         conn.commit()
@@ -216,8 +226,19 @@ def _attempt_payload(row: sqlite3.Row) -> dict:
         "hint_rung": row["hint_rung"],
         "correction_ja": row["correction_ja"],
         "correction_en": row["correction_en"],
+        "pitch_advisory": _load_advisory(row["pitch_advisory"]),
         "created_at": row["created_at"],
     }
+
+
+def _load_advisory(raw: object) -> dict[str, Any] | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _hint_max_from_attempts(attempts: list[sqlite3.Row]) -> dict[str, int]:
@@ -303,10 +324,18 @@ def _create_current_tables(conn: sqlite3.Connection) -> None:
           created_at TEXT DEFAULT CURRENT_TIMESTAMP,
           hint_rung INTEGER,
           correction_ja TEXT,
-          correction_en TEXT
+          correction_en TEXT,
+          pitch_advisory TEXT
         );
         """
     )
+
+
+def _migrate_to_current(conn: sqlite3.Connection, version: int | None) -> None:
+    if version is None or version < 2:
+        _migrate_v1_to_v2(conn)
+    if version is None or version < 3:
+        _add_column(conn, "attempts", "pitch_advisory", "TEXT")
 
 
 def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:

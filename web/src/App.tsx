@@ -37,6 +37,7 @@ import { bestCorrections, goalChecklist, turnKind, type Phase } from "./flow";
 import { KeyedSprite } from "./KeyedSprite";
 import type { MouthFrame } from "./mouth";
 import { BriefingScreen, DebriefScreen, WarmupScreen } from "./phases";
+import { advisoryLine, type PitchAdvisory } from "./pitchAdvisory";
 import { soraSpriteUrl } from "./sprites";
 import { townMapUrl } from "./townMap";
 import { TownView } from "./TownView";
@@ -107,6 +108,7 @@ export default function App() {
   const [warmupPhrase, setWarmupPhrase] = useState<KeyPhrase | null>(null);
   const [warmupIndex, setWarmupIndex] = useState(0);
   const [debrief, setDebrief] = useState<TurnResult | null>(null);
+  const [pitchAdvisory, setPitchAdvisory] = useState<PitchAdvisory | null>(null);
   const hintMaxRef = useRef<Record<string, number>>({});
   const sessionIdRef = useRef<string | null>(null);
 
@@ -126,6 +128,7 @@ export default function App() {
       if (result.npc?.ja) setNpc(result.npc);
       if (result.reset) {
         setGoals([]);
+        setPitchAdvisory(null);
         setDebrief(null);
         setWarmupPhrase(null);
         setWarmupIndex(0);
@@ -139,6 +142,9 @@ export default function App() {
         setPhase(kind === "briefing" ? "briefing" : "roleplay");
         if (kind !== "briefing") setInput("ふたりです");
         return;
+      }
+      if (result.pitch_advisory?.is_advisory) {
+        setPitchAdvisory(result.pitch_advisory);
       }
       if (kind === "warmup") {
         const done = Boolean(result.warmup_complete) || result.phase === "roleplay";
@@ -198,6 +204,7 @@ export default function App() {
       setWarmupPhrase(null);
       setWarmupIndex(0);
       setDebrief(null);
+      setPitchAdvisory(null);
       setLadder(createHintLadder(level, s.node_expects?.[0] ?? ""));
       setHintEpoch(0);
     })();
@@ -382,6 +389,7 @@ export default function App() {
   );
   const corrections = bestCorrections(debrief?.corrections ?? []);
   const talking = phase === "roleplay" || phase === "warmup";
+  const pitchLine = advisoryLine(coach?.pitch_advisory) || advisoryLine(pitchAdvisory);
   const expression: SoraExpression | "neutral" = coachPending
     ? "think"
     : coach
@@ -445,6 +453,7 @@ export default function App() {
             stars={debrief.stars ?? stars.stars}
             goals={checklist}
             corrections={corrections}
+            pitchAdvisory={debrief.pitch_advisory ?? pitchAdvisory}
             onReplay={() => void restart("replay")}
             onBriefing={() => void restart("briefing")}
           />
@@ -503,6 +512,7 @@ export default function App() {
         {typeof coach?.hint_rung === "number" ? (
           <p className="goals">Tutor rung: {coach.hint_rung}</p>
         ) : null}
+        {pitchLine ? <p className="pitch-advisory">{pitchLine}</p> : null}
         <ul>
           {session.key_phrases.map((kp) => (
             <li key={kp.ja}>

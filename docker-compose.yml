@@ -29,6 +29,8 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-none}
       ASR_URL: ${ASR_URL:-http://asr-cpu:8101}
       TTS_URL: ${TTS_URL:-http://tts-cpu:8102}
+      # Empty on the CPU demo. Set http://pron:8103 when the pron service is up.
+      PRON_URL: ${PRON_URL:-}
       ASSETS_BASE_URL: ${ASSETS_BASE_URL:-http://localhost:8080}
       ASSETS_PATH: ${ASSETS_PATH:-/assets}
       SCENARIOS_PATH: /scenarios
@@ -84,13 +86,10 @@ services:
       - ./voices:/voices:ro
 
   pron:
-    <<: *gpu
     build: ./pron
     profiles: [spark, rtx3090]
     ports:
       - "8103:8103"
-    volumes:
-      - hf-cache:/root/.cache/huggingface
 
   assets:
     image: nginx:1.27-alpine

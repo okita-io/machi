@@ -1,5 +1,6 @@
 import type { KeyPhrase } from "./api";
 import type { CorrectionLike, GoalStatus } from "./flow";
+import { advisoryLine, debriefStars, type PitchAdvisory } from "./pitchAdvisory";
 
 export function BriefingScreen({
   title,
@@ -80,22 +81,31 @@ export function DebriefScreen({
   stars,
   goals,
   corrections,
+  pitchAdvisory,
   onReplay,
   onBriefing,
 }: {
   stars: number;
   goals: GoalStatus[];
   corrections: (CorrectionLike & { romaji?: string; ruby_html?: string })[];
+  pitchAdvisory?: PitchAdvisory | null;
   onReplay: () => void;
   onBriefing: () => void;
 }) {
-  const glyphs = "★".repeat(stars) + "☆".repeat(Math.max(0, 3 - stars));
+  const shown = debriefStars(stars, pitchAdvisory);
+  const glyphs = "★".repeat(shown) + "☆".repeat(Math.max(0, 3 - shown));
+  const pitchLine = advisoryLine(pitchAdvisory);
   return (
     <section className="flow-panel" data-screen="debrief">
       <p className="hint-kicker">Debrief</p>
-      <p className="stars" data-stars={stars}>
+      <p className="stars" data-stars={shown}>
         {glyphs}
       </p>
+      {pitchLine ? (
+        <p className="pitch-advisory" data-pitch-advisory="yes">
+          {pitchLine}
+        </p>
+      ) : null}
       <ul className="goal-list">
         {goals.map((goal) => (
           <li key={goal.id} data-done={goal.done ? "yes" : "no"}>

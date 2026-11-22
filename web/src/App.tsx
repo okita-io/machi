@@ -1,4 +1,5 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
+import { playNpcAudio } from "./audio/playback";
 import { useMic } from "./audio/useMic";
 import { createSession, sendTurn, type NpcLine, type SessionStart, type TurnResult } from "./api";
 import "./App.css";
@@ -20,27 +21,13 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [goals, setGoals] = useState<string[]>([]);
   const [handsFree, setHandsFree] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  const playTts = useCallback((b64: string) => {
-    const src = `data:audio/wav;base64,${b64}`;
-    if (!audioRef.current) {
-      audioRef.current = new Audio(src);
-    } else {
-      audioRef.current.src = src;
-    }
-    void audioRef.current.play();
+  const applyTurn = useCallback((result: TurnResult) => {
+    setNpc(result.npc);
+    setCoach(result.coach.coach_note_en);
+    setGoals(result.completed_goals);
+    playNpcAudio(result.tts_audio_b64);
   }, []);
-
-  const applyTurn = useCallback(
-    (result: TurnResult) => {
-      setNpc(result.npc);
-      setCoach(result.coach.coach_note_en);
-      setGoals(result.completed_goals);
-      playTts(result.tts_audio_b64);
-    },
-    [playTts],
-  );
 
   const mic = useMic(session?.session_id ?? null, handsFree, applyTurn);
 

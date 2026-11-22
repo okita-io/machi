@@ -51,12 +51,17 @@ class TurnLatency:
             headers[f"X-Latency-{stage.upper()}"] = f"{ms:.3f}"
         return headers
 
-    def emit(self, *, session_id: str) -> dict[str, float | None]:
-        """Log one JSON line and return rounded per-stage milliseconds."""
+    def emit(self, *, session_id: str, cancelled: bool = False) -> dict[str, float | None]:
+        """Log one JSON line and return rounded per-stage milliseconds.
+
+        ``cancelled`` is true when barge-in aborts the turn before its result
+        is delivered. Stages that had started still report their elapsed time.
+        """
         stages = self.rounded_ms()
         payload = {
             "event": "turn_latency",
             "session_id": session_id,
+            "cancelled": cancelled,
             "stages_ms": stages,
         }
         logger.info("%s", json.dumps(payload, separators=(",", ":")))

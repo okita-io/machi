@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
@@ -42,6 +43,31 @@ logger = logging.getLogger(__name__)
 SCENARIOS: dict = {}
 SESSIONS: dict[str, SessionState] = {}
 LLM = LlmClient()
+
+
+class _InFlightTurn:
+    """One running ``session_turn`` task for a WebSocket session."""
+
+    def __init__(self) -> None:
+        self.task: asyncio.Task[None] | None = None
+        self.generation: int = 0
+
+
+# Barge-in cancels the task in this map. A newer audio_start or turn bumps
+# generation so a task that already finished its awaits still drops its result.
+IN_FLIGHT: dict[str, _InFlightTurn] = {}
+
+
+class _WsSink:
+    """Serializes JSON sends so a turn task and the receive loop cannot overlap."""
+
+    def __init__(self, websocket: WebSocket) -> None:
+        self._ws = websocket
+        self._lock = asyncio.Lock()
+
+    async def send_json(self, payload: dict[str, Any]) -> None:
+        async with self._lock:
+            await self._ws.send_json(payload)
 
 
 @asynccontextmanager
@@ -136,6 +162,33 @@ async def session_turn(
         raise HTTPException(status_code=404, detail="session not found")
 
     timer = TurnLatency()
+    snapshot = _snapshot_flow(state)
+    try:
+        result = await _session_turn_pipeline(state, body, timer)
+    except asyncio.CancelledError:
+        # Barge-in: drop flow mutations so the learner can say the line again.
+        _restore_flow(state, snapshot)
+        timer.emit(session_id=session_id, cancelled=True)
+        raise
+
+    for key, value in timer.header_map().items():
+        response.headers[key] = value
+    timer.emit(session_id=session_id, cancelled=False)
+    record_attempt(
+        Path(settings.db_path),
+        session_id,
+        state.node_id,
+        result["learner_text"],
+        result["goal_hits"],
+    )
+    return result
+
+
+async def _session_turn_pipeline(
+    state: SessionState,
+    body: TurnRequest,
+    timer: TurnLatency,
+) -> dict[str, Any]:
     # Blank text is not a typed turn, so audio_b64 alone still reaches ASR.
     utterance = (body.text or "").strip()
     try:
@@ -188,19 +241,9 @@ async def session_turn(
             audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
     except SpeechError as exc:
         raise _speech_unavailable(exc) from exc
-    for key, value in timer.header_map().items():
-        response.headers[key] = value
-    timer.emit(session_id=session_id)
-    record_attempt(
-        Path(settings.db_path),
-        session_id,
-        state.node_id,
-        utterance,
-        goal_hits,
-    )
 
     return {
-        "session_id": session_id,
+        "session_id": state.id,
         "node_id": state.node_id,
         "learner_text": utterance,
         "goal_hits": goal_hits,
@@ -209,6 +252,18 @@ async def session_turn(
         "tts_audio_b64": base64.b64encode(audio).decode("ascii"),
         "completed_goals": sorted(state.completed_goals),
     }
+
+
+def _snapshot_flow(state: SessionState) -> tuple[str, set[str], int, int]:
+    return (state.node_id, set(state.completed_goals), state.hint_rung, state.retries)
+
+
+def _restore_flow(state: SessionState, snap: tuple[str, set[str], int, int]) -> None:
+    node_id, goals, hint_rung, retries = snap
+    state.node_id = node_id
+    state.completed_goals = set(goals)
+    state.hint_rung = hint_rung
+    state.retries = retries
 
 
 def _decode_audio_b64(audio_b64: str) -> bytes:
@@ -234,15 +289,84 @@ def _ws_bool(value: object) -> bool:
     return value is True
 
 
+def _in_flight(session_id: str) -> _InFlightTurn:
+    slot = IN_FLIGHT.get(session_id)
+    if slot is None:
+        slot = _InFlightTurn()
+        IN_FLIGHT[session_id] = slot
+    return slot
+
+
+async def _cancel_inflight(session_id: str) -> None:
+    """Cancel the session's running turn, if any, and wait until it stops."""
+    slot = _in_flight(session_id)
+    slot.generation += 1
+    task = slot.task
+    slot.task = None
+    if task is None or task.done():
+        return
+    logger.info("barge-in cancel session=%s", session_id)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+async def _schedule_ws_turn(
+    sink: _WsSink,
+    session_id: str,
+    text: str | None,
+    audio_b64: str | None,
+) -> None:
+    await _cancel_inflight(session_id)
+    slot = _in_flight(session_id)
+    generation = slot.generation
+    task = asyncio.create_task(
+        _deliver_ws_turn(sink, session_id, generation, text, audio_b64),
+        name=f"machi-turn-{session_id}",
+    )
+    slot.task = task
+
+
+async def _deliver_ws_turn(
+    sink: _WsSink,
+    session_id: str,
+    generation: int,
+    text: str | None,
+    audio_b64: str | None,
+) -> None:
+    try:
+        result = await session_turn(
+            session_id,
+            TurnRequest(text=text, audio_b64=audio_b64),
+            Response(),
+        )
+    except asyncio.CancelledError:
+        raise
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, str) else "turn_failed"
+        await sink.send_json({"type": "error", "detail": detail})
+        return
+    except Exception:
+        logger.exception("websocket turn failed session=%s", session_id)
+        await sink.send_json({"type": "error", "detail": "turn_failed"})
+        return
+    slot = _in_flight(session_id)
+    if slot.generation != generation or slot.task is not asyncio.current_task():
+        return
+    await sink.send_json({"type": "turn_result", **result})
+
+
 async def _ws_pcm_frame(
-    websocket: WebSocket,
+    sink: _WsSink,
     session_id: str,
     buf: SessionAudioBuffer,
     gate: UtteranceGate | None,
     payload: bytes,
 ) -> None:
     if len(payload) != PCM_FRAME_BYTES:
-        await websocket.send_json(
+        await sink.send_json(
             {
                 "type": "audio_ack",
                 "frames": buf.frames,
@@ -253,7 +377,7 @@ async def _ws_pcm_frame(
         )
         return
     accepted = buf.append(payload)
-    await websocket.send_json(
+    await sink.send_json(
         {
             "type": "audio_ack",
             "frames": buf.frames,
@@ -273,13 +397,13 @@ async def _ws_pcm_frame(
     if decision is not TurnDecision.CUT:
         return
     logger.info("hands-free endpoint session=%s", session_id)
-    await _ws_turn(websocket, session_id, buf, {})
+    await _ws_turn(sink, session_id, buf, {})
     gate.reset()
     buf.start(hands_free=True)
 
 
 async def _ws_turn(
-    websocket: WebSocket,
+    sink: _WsSink,
     session_id: str,
     buf: SessionAudioBuffer,
     data: dict[str, Any],
@@ -296,25 +420,11 @@ async def _ws_turn(
         buf.clear()
     else:
         audio_b64 = buf.take_b64()
-    try:
-        result = await session_turn(
-            session_id,
-            TurnRequest(text=text, audio_b64=audio_b64),
-            Response(),
-        )
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else "turn_failed"
-        await websocket.send_json({"type": "error", "detail": detail})
-        return
-    except Exception:
-        logger.exception("websocket turn failed session=%s", session_id)
-        await websocket.send_json({"type": "error", "detail": "turn_failed"})
-        return
-    await websocket.send_json({"type": "turn_result", **result})
+    await _schedule_ws_turn(sink, session_id, text, audio_b64)
 
 
 async def _ws_control(
-    websocket: WebSocket,
+    sink: _WsSink,
     session_id: str,
     buf: SessionAudioBuffer,
     gate: UtteranceGate | None,
@@ -323,17 +433,19 @@ async def _ws_control(
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        await websocket.send_json({"type": "error", "detail": "invalid_json"})
+        await sink.send_json({"type": "error", "detail": "invalid_json"})
         return
     if not isinstance(data, dict):
-        await websocket.send_json({"type": "error", "detail": "expected_object"})
+        await sink.send_json({"type": "error", "detail": "expected_object"})
         return
     kind = data.get("type")
     if kind == "audio_start":
+        # New speech supersedes an NPC line still being generated.
+        await _cancel_inflight(session_id)
         buf.start(hands_free=_ws_bool(data.get("hands_free")))
         if hands_free_turn_taking(buf.hands_free, gate):
             gate.reset()
-        await websocket.send_json(
+        await sink.send_json(
             {
                 "type": "audio_ack",
                 "frames": buf.frames,
@@ -344,7 +456,7 @@ async def _ws_control(
         return
     if kind == "audio_stop":
         frames = buf.stop()
-        await websocket.send_json(
+        await sink.send_json(
             {
                 "type": "audio_ack",
                 "frames": frames,
@@ -354,9 +466,9 @@ async def _ws_control(
         )
         return
     if kind == "turn":
-        await _ws_turn(websocket, session_id, buf, data)
+        await _ws_turn(sink, session_id, buf, data)
         return
-    await websocket.send_json({"type": "error", "detail": "unknown_type"})
+    await sink.send_json({"type": "error", "detail": "unknown_type"})
 
 
 @app.websocket("/ws/{session_id}")
@@ -368,11 +480,15 @@ async def ws_session(websocket: WebSocket, session_id: str) -> None:
     scorer. Hands-free runs VAD on each accepted frame and, after the scorer
     cuts (or the 500 ms silence ceiling), emits ``turn_result`` the same way
     a client ``turn`` event does.
+
+    Each session has at most one in-flight turn task. A new ``audio_start`` or
+    ``turn`` cancels it. The cancelled task does not send ``turn_result``.
     """
     await websocket.accept()
     if session_id not in SESSIONS:
         await websocket.close(code=4404)
         return
+    sink = _WsSink(websocket)
     buf = SessionAudioBuffer()
     gate = build_turn_gate()
     try:
@@ -383,8 +499,11 @@ async def ws_session(websocket: WebSocket, session_id: str) -> None:
             payload = message.get("bytes")
             raw = message.get("text")
             if payload is not None:
-                await _ws_pcm_frame(websocket, session_id, buf, gate, payload)
+                await _ws_pcm_frame(sink, session_id, buf, gate, payload)
             elif raw is not None:
-                await _ws_control(websocket, session_id, buf, gate, raw)
+                await _ws_control(sink, session_id, buf, gate, raw)
     except (WebSocketDisconnect, WebSocketDisconnected):
         return
+    finally:
+        await _cancel_inflight(session_id)
+        IN_FLIGHT.pop(session_id, None)

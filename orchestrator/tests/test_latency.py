@@ -38,6 +38,7 @@ def test_turn_latency_records_stages_skips_as_null_and_emits(caplog):
     payload = json.loads(caplog.records[-1].message)
     assert payload["event"] == "turn_latency"
     assert payload["session_id"] == "sess-1"
+    assert payload["cancelled"] is False
     assert payload["stages_ms"]["asr"] is None
     assert payload["stages_ms"]["llm"] == stages[STAGE_LLM]
     assert payload["stages_ms"]["tts"] == stages[STAGE_TTS]

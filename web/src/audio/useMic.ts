@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { TurnResult } from "../api";
 import { MicCapture, micErrorMessage } from "./capture";
+import { stopPlayback } from "./playback";
 import { encodeControl, sessionWsUrl } from "./socket";
 
 type ServerEvent =
@@ -13,6 +14,8 @@ type ServerEvent =
  * Push-to-talk (`handsFree` false) ends on release (`audio_stop` + `turn`).
  * The server does not run VAD on that path. Hands-free may emit `turn_result`
  * after trailing silence; release still sends `turn`.
+ * Starting a capture (push-to-talk press or hands-free capture start) stops
+ * NPC playback immediately. The server cancels an in-flight turn on `audio_start`.
  */
 export function useMic(
   sessionId: string | null,
@@ -85,6 +88,7 @@ export function useMic(
       setError("Session WebSocket is not connected");
       return;
     }
+    stopPlayback();
     pressedRef.current = true;
     sentStartRef.current = false;
     const gen = ++seqRef.current;

@@ -109,7 +109,7 @@ Non-commercial models may only appear behind an explicit research flag if ever a
 
 ## Milestone task list
 
-Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
+Status: `[x]` done, `[ ]` not started, `[-]` in progress.
 
 ### Scaffold (S0) — largely complete in PR #1
 
@@ -263,16 +263,16 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 
 ## Task summary
 
-| Milestone | Tasks | Done in PR #1 |
+| Milestone | Tasks | Done |
 | --- | ---: | ---: |
-| S0 Scaffold | 11 | 10 |
-| M0 Voice loop | 13 | 0 |
-| M1 Ramen MVP | 12 | 0 |
-| M2 Coaching | 7 | 0 |
-| M3 Neighborhood | 7 | 0 |
-| M4 Polish | 5 | 0 |
-| M5 Optional | 3 | 0 |
-| INFRA | 5 | 0 |
-| **Total** | **63** | **10** |
+| S0 Scaffold | 11 | 11 |
+| M0 Voice loop | 13 | 8 |
+| M1 Ramen MVP | 12 | 11 |
+| M2 Coaching | 7 | 5 |
+| M3 Neighborhood | 7 | 7 |
+| M4 Polish | 5 | 3 |
+| M5 Optional | 3 | 2 |
+| INFRA | 5 | 1 |
+| **Total** | **63** | **48** |
 
-_Last updated with M4-04 (LAN HTTPS), M5-02 (scenario editor), M5-03 (offline ComfyUI bake), M2-07 (spoken review sessions), M3-07 (cross-scenario SRS weaving), M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._
+_Last updated after M5 batch (S0/M0/M1/M2/M3/M4/M5/INFRA automated runs)._

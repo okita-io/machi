@@ -1,0 +1,182 @@
+id: directions_01
+title:
+  en: "Directions: the station"
+  ja: "駅への道"
+level: [1, 2, 3, 4]
+hint_defaults:
+  1: english
+  2: romaji
+  3: kana
+  4: none
+scene:
+  background: bg/street.webp
+  ambience: sfx/street_loop.ogg
+  # Pins the mini-map draws. ghost_path is the SVG polyline through them.
+  ghost_path: "64,204 174,184 240,140 308,88"
+  hotspots:
+    - rect: [40, 180, 48, 48]
+      x: 64
+      y: 204
+      ja: "現在地"
+      kana: "げんざいち"
+      en: "You are here"
+    - rect: [150, 160, 48, 48]
+      x: 174
+      y: 184
+      ja: "交差点"
+      kana: "こうさてん"
+      en: "Corner"
+    - rect: [216, 116, 48, 48]
+      x: 240
+      y: 140
+      ja: "コンビニ"
+      kana: "こんびに"
+      en: "Convenience store"
+    - rect: [280, 60, 56, 56]
+      x: 308
+      y: 88
+      ja: "駅"
+      kana: "えき"
+      en: "Station"
+      opens: station_pin
+npc:
+  id: local_mori
+  role: "Neighbor on a street corner, kind, unhurried, gives short directions"
+  voice:
+    engine: qwen3_tts
+    speaker: Ono_Anna
+    style: "warm, clear, a little slow"
+  register: polite_casual
+  speed:
+    1: slow
+    2: natural
+    3: natural
+    4: fast
+guide:
+  id: sora
+  brief_en: "You are on a street corner and need the station. Ask where it is, confirm the right then the left turn, and stop on the station pin."
+  voice:
+    engine: irodori
+    design: "gentle young woman, warm, slightly playful"
+goals:
+  - id: ask_station
+    prompt_en: "Ask where the station is."
+    coach_en: "Ask 駅はどこですか."
+    accept:
+      - "駅はどこですか"
+      - "駅はどこ"
+      - "えきはどこですか"
+      - "えきはどこ"
+      - "駅はどちらですか"
+      - "えきはどちらですか"
+      - "eki wa doko desu ka"
+      - "eki wa doko"
+      - "eki wa dochira desu ka"
+  - id: confirm_right
+    prompt_en: "Confirm the first turn to the right."
+    coach_en: "Repeat the turn: 右ですね or 右に曲がります."
+    accept:
+      - "右ですね"
+      - "右に曲がります"
+      - "右ですか"
+      - "みぎですね"
+      - "みぎにまがります"
+      - "みぎですか"
+      - "右に曲がるんですね"
+      - "migi desu ne"
+      - "migi ni magarimasu"
+      - "migi desu ka"
+  - id: confirm_left
+    prompt_en: "Confirm the next turn to the left."
+    coach_en: "Check the second turn: 左ですね or 左に曲がります."
+    accept:
+      - "左ですね"
+      - "左に曲がります"
+      - "左ですか"
+      - "ひだりですね"
+      - "ひだりにまがります"
+      - "ひだりですか"
+      - "左に曲がるんですね"
+      - "hidari desu ne"
+      - "hidari ni magarimasu"
+      - "hidari desu ka"
+  - id: arrive
+    prompt_en: "Say you have reached the station pin."
+    coach_en: "When the pin is the station, say 駅はここですか or 着きました."
+    accept:
+      - "駅はここですか"
+      - "ここが駅ですか"
+      - "着きました"
+      - "えきはここですか"
+      - "つきました"
+      - "この道で駅まで行きます"
+      - "このみちでえきまでいきます"
+      - "eki wa koko desu ka"
+      - "koko ga eki desu ka"
+      - "tsukimashita"
+      - "kono michi de eki made ikimasu"
+key_phrases:
+  - ja: "駅はどこですか"
+    kana: "えきはどこですか"
+    romaji: "eki wa doko desu ka"
+    en: "Where is the station?"
+  - ja: "右ですね"
+    kana: "みぎですね"
+    romaji: "migi desu ne"
+    en: "To the right, right?"
+  - ja: "左ですね"
+    kana: "ひだりですね"
+    romaji: "hidari desu ne"
+    en: "To the left, right?"
+  - ja: "駅はここですか"
+    kana: "えきはここですか"
+    romaji: "eki wa koko desu ka"
+    en: "Is the station here?"
+flow:
+  start: greet
+  nodes:
+    greet:
+      npc: "こんにちは。何かお探しですか？"
+      npc_kana: "こんにちは。なにかおさがしですか？"
+      expects: ask_station
+      on_success: right_turn
+      on_other:
+        clarify: "駅をお探しですか？"
+        max_retries: 2
+    right_turn:
+      npc: "駅ですね。この角を右に曲がってください。"
+      npc_kana: "えきですね。このかどをみぎにまがってください。"
+      expects: confirm_right
+      on_success: left_turn
+      on_other:
+        clarify: "右に曲がってください。右ですね？"
+        max_retries: 2
+    left_turn:
+      npc: "次のコンビニの角を左です。わかりますか？"
+      npc_kana: "つぎのコンビニのかどをひだりです。わかりますか？"
+      expects: confirm_left
+      on_success: pin
+      on_other:
+        clarify: "左に曲がります。左ですね？"
+        max_retries: 2
+    pin:
+      npc: "突き当たりが駅です。地図の印までどうぞ。"
+      npc_kana: "つきあたりがえきです。ちずのしるしまでどうぞ。"
+      expects: arrive
+      npc_on_success: "はい、そこが駅です。気をつけて！"
+      npc_on_success_kana: "はい、そこがえきです。きをつけて！"
+      on_success: debrief
+      on_other:
+        clarify: "この印が駅ですよ。"
+        max_retries: 2
+    debrief:
+      debrief: true
+      end: true
+      narration_en: "You followed the turns and reached the station pin."
+success:
+  required: [ask_station, confirm_right, confirm_left, arrive]
+  stars:
+    3: "no hints above level default"
+    2: "one rung climbed"
+    1: "completed"
+srs_tags: [directions, station, town, left_right]

@@ -58,6 +58,8 @@
 | Taxi | Rank and cab | Arrive and pay |
 | Train ticket | Machine + window | Ticket + right platform |
 
+Neighborhood files: `scenarios/konbini_checkout_01.yaml`, `scenarios/directions_01.yaml`, `scenarios/coin_laundry_01.yaml`, `scenarios/taxi_01.yaml`, `scenarios/train_ticket_01.yaml`. Each lists levels 1–4 with the default hint from the table below (`hint_defaults`). Directions adds hotspot `x`/`y` pins and `scene.ghost_path`, an SVG polyline the map UI can draw later. The street background is `bg/street.webp`.
+
 ### Levels and hint ladder
 
 | Level | Default hint |

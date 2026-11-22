@@ -1,0 +1,184 @@
+id: taxi_01
+title:
+  en: "Taxi: to the station"
+  ja: "タクシー"
+level: [1, 2, 3, 4]
+hint_defaults:
+  1: english
+  2: romaji
+  3: kana
+  4: none
+scene:
+  background: bg/taxi_rank.webp
+  ambience: sfx/traffic_loop.ogg
+  hotspots:
+    - rect: [420, 260, 220, 140]
+      ja: "タクシー"
+      kana: "たくしー"
+      en: "Taxi"
+    - rect: [80, 80, 160, 70]
+      ja: "駅"
+      kana: "えき"
+      en: "Station"
+      opens: station
+npc:
+  id: driver_sato
+  role: "Taxi driver, calm, confirms the destination and the meter"
+  voice:
+    engine: qwen3_tts
+    speaker: Ono_Anna
+    style: "low, steady, polite"
+  register: polite_service
+  speed:
+    1: slow
+    2: natural
+    3: natural
+    4: fast
+guide:
+  id: sora
+  brief_en: "Hail the cab, say you are going to the station, agree to the route and the fare, then pay with IC or cash when you arrive."
+  voice:
+    engine: irodori
+    design: "gentle young woman, warm, slightly playful"
+goals:
+  - id: destination
+    prompt_en: "Say you want to go to the station."
+    coach_en: "Tell the driver 駅までお願いします."
+    slots:
+      place: station
+    accept:
+      - "駅までお願いします"
+      - "駅まで"
+      - "えきまでおねがいします"
+      - "えきまで"
+      - "東京駅までお願いします"
+      - "とうきょうえきまでおねがいします"
+      - "駅まで行きたいです"
+      - "えきまでいきたいです"
+      - "eki made onegaishimasu"
+      - "eki made"
+      - "toukyou eki made onegaishimasu"
+      - "eki made ikitai desu"
+  - id: confirm_route
+    prompt_en: "Agree to the route the driver suggests."
+    coach_en: "Say この道でお願いします or はい、大丈夫です."
+    accept:
+      - "この道でお願いします"
+      - "この道で"
+      - "このみちでおねがいします"
+      - "このみちで"
+      - "はい、大丈夫です"
+      - "はい、だいじょうぶです"
+      - "その道でお願いします"
+      - "そのみちでおねがいします"
+      - "kono michi de onegaishimasu"
+      - "kono michi de"
+      - "hai daijoubu desu"
+      - "sono michi de onegaishimasu"
+  - id: confirm_fare
+    prompt_en: "Confirm the fare is about 700 yen."
+    coach_en: "Check the price: 700円ですね or はい、大丈夫です."
+    slots:
+      fare: 700
+    accept:
+      - "700円ですね"
+      - "七百円ですね"
+      - "ななひゃくえんです"
+      - "ななひゃくえんですね"
+      - "はい、大丈夫です"
+      - "はい、だいじょうぶです"
+      - "メーターで大丈夫です"
+      - "めーたーでだいじょうぶです"
+      - "nanahyaku en desu ne"
+      - "nanahyaku en desu"
+      - "hai daijoubu desu"
+      - "meetaa de daijoubu desu"
+  - id: pay
+    prompt_en: "Pay with a transit IC card or with cash."
+    coach_en: "Say 交通系で or 現金でお願いします."
+    slots:
+      method: ic
+    accept:
+      - "交通系で"
+      - "交通系ICで"
+      - "こうつうけいで"
+      - "こうつうけいアイシーで"
+      - "現金で"
+      - "げんきんで"
+      - "現金でお願いします"
+      - "ICでお願いします"
+      - "アイシーでおねがいします"
+      - "kotsukei de"
+      - "kotsukei aishii de"
+      - "genkin de"
+      - "genkin de onegaishimasu"
+      - "ic de onegaishimasu"
+key_phrases:
+  - ja: "駅までお願いします"
+    kana: "えきまでおねがいします"
+    romaji: "eki made onegaishimasu"
+    en: "To the station, please."
+  - ja: "この道でお願いします"
+    kana: "このみちでおねがいします"
+    romaji: "kono michi de onegaishimasu"
+    en: "This road, please."
+  - ja: "700円ですね"
+    kana: "ななひゃくえんですね"
+    romaji: "nanahyaku en desu ne"
+    en: "700 yen, right?"
+  - ja: "交通系でお願いします"
+    kana: "こうつうけいでおねがいします"
+    romaji: "kotsukei de onegaishimasu"
+    en: "Transit IC, please."
+  - ja: "現金でお願いします"
+    kana: "げんきんでおねがいします"
+    romaji: "genkin de onegaishimasu"
+    en: "Cash, please."
+flow:
+  start: greet
+  nodes:
+    greet:
+      npc: "おはようございます。どちらまでですか？"
+      npc_kana: "おはようございます。どちらまでですか？"
+      expects: destination
+      on_success: route
+      on_other:
+        clarify: "どちらまで行きましょうか？"
+        max_retries: 2
+    route:
+      npc: "駅ですね。この道で10分くらいです。よろしいですか？"
+      npc_kana: "えきですね。このみちでじゅっぷんくらいです。よろしいですか？"
+      expects: confirm_route
+      on_success: fare
+      on_other:
+        clarify: "この道で大丈夫ですか？"
+        max_retries: 2
+    fare:
+      npc: "メーターでだいたい700円です。よろしいですか？"
+      npc_kana: "めーたーでだいたいななひゃくえんです。よろしいですか？"
+      expects: confirm_fare
+      on_success: pay
+      on_other:
+        clarify: "700円くらいですが、大丈夫ですか？"
+        max_retries: 2
+    pay:
+      npc: "駅前に着きました。700円です。"
+      npc_kana: "えきまえにつきました。ななひゃくえんです。"
+      expects: pay
+      npc_on_success: "ありがとうございました。気をつけて！"
+      npc_on_success_kana: "ありがとうございました。きをつけて！"
+      on_success: debrief
+      on_other:
+        clarify: "交通系ですか？現金ですか？"
+        max_retries: 2
+    debrief:
+      debrief: true
+      end: true
+      narration_en: "You arrived at the station and paid the fare."
+success:
+  required: [destination, confirm_route, confirm_fare, pay]
+  stars:
+    3: "no hints above level default"
+    2: "one rung climbed"
+    1: "completed"
+srs_tags: [taxi, transport, payment, destination]

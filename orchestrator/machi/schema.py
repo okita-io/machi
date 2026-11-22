@@ -18,12 +18,17 @@ class Hotspot(BaseModel):
     kana: str
     en: str
     opens: str | None = None
+    # Mini-map pin. Directions uses these; other scenes leave them empty.
+    x: int | None = None
+    y: int | None = None
 
 
 class SceneSpec(BaseModel):
     background: str
     ambience: str | None = None
     hotspots: list[Hotspot] = Field(default_factory=list)
+    # SVG polyline ("x,y x,y ...") the town UI draws as the ghost path.
+    ghost_path: str | None = None
 
 
 class VoiceSpec(BaseModel):
@@ -44,6 +49,7 @@ class NpcSpec(BaseModel):
 class GuideSpec(BaseModel):
     id: str
     voice: VoiceSpec
+    brief_en: str | None = None
 
 
 class GoalSpec(BaseModel):
@@ -53,6 +59,7 @@ class GoalSpec(BaseModel):
     accept_intent: str | None = None
     slots: dict[str, Any] = Field(default_factory=dict)
     optional: bool = False
+    coach_en: str | None = None
 
 
 class KeyPhrase(BaseModel):
@@ -97,6 +104,10 @@ class SuccessSpec(BaseModel):
     stars: dict[int, str] = Field(default_factory=dict)
 
 
+# Spec hint ladder: level 1 English, 2 romaji, 3 kana, 4 no help.
+HINT_DEFAULTS: dict[int, str] = {1: "english", 2: "romaji", 3: "kana", 4: "none"}
+
+
 class ScenarioSpec(BaseModel):
     id: str
     title: LocalizedTitle
@@ -109,12 +120,26 @@ class ScenarioSpec(BaseModel):
     flow: FlowSpec
     success: SuccessSpec
     srs_tags: list[str] = Field(default_factory=list)
+    hint_defaults: dict[int, str] = Field(default_factory=dict)
 
     @field_validator("level")
     @classmethod
     def levels_positive(cls, v: list[int]) -> list[int]:
         if not v:
             raise ValueError("level must include at least one difficulty")
+        return v
+
+    @field_validator("hint_defaults")
+    @classmethod
+    def hint_defaults_match_spec(cls, v: dict[int, str]) -> dict[int, str]:
+        if not v:
+            return v
+        if set(v) != set(HINT_DEFAULTS):
+            raise ValueError("hint_defaults must define levels 1-4")
+        for level, label in v.items():
+            expected = HINT_DEFAULTS[level]
+            if label != expected:
+                raise ValueError(f"level {level} default hint is {expected}")
         return v
 
     def goal_by_id(self, goal_id: str) -> GoalSpec | None:

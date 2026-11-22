@@ -1,0 +1,177 @@
+id: konbini_checkout_01
+title:
+  en: "Konbini: one bento"
+  ja: "コンビニ"
+level: [1, 2, 3, 4]
+hint_defaults:
+  1: english
+  2: romaji
+  3: kana
+  4: none
+scene:
+  background: bg/konbini_counter.webp
+  ambience: sfx/konbini_loop.ogg
+  hotspots:
+    - rect: [640, 220, 280, 200]
+      ja: "レジ"
+      kana: "れじ"
+      en: "Register"
+    - rect: [80, 180, 240, 160]
+      ja: "お弁当"
+      kana: "おべんとう"
+      en: "Bento shelf"
+npc:
+  id: clerk_aoki
+  role: "Convenience store clerk, polite, quick lunch-rush register"
+  voice:
+    engine: qwen3_tts
+    speaker: Ono_Anna
+    style: "bright, short, polite"
+  register: polite_service
+  speed:
+    1: slow
+    2: natural
+    3: natural
+    4: fast
+guide:
+  id: sora
+  brief_en: "You are at the register with one bento. Say what you want, answer the heat question, say you have no point card, and pay."
+  voice:
+    engine: irodori
+    design: "gentle young woman, warm, slightly playful"
+goals:
+  - id: order_bento
+    prompt_en: "Say you want one bento."
+    coach_en: "Ask for one bento: お弁当をひとつください."
+    accept:
+      - "お弁当ひとつ"
+      - "お弁当をひとつ"
+      - "お弁当を一つ"
+      - "お弁当をひとつください"
+      - "おべんとうひとつ"
+      - "おべんとうをひとつください"
+      - "おべんとうをひとつ"
+      - "obentou hitotsu"
+      - "obentou o hitotsu kudasai"
+      - "o bentou o hitotsu kudasai"
+  - id: heat
+    prompt_en: "Answer the heat question (yes, heat it, or no, leave it)."
+    coach_en: "Yes is 温めてください. No is そのままでいいです."
+    accept:
+      - "温めてください"
+      - "温めます"
+      - "はい、温めてください"
+      - "あたためてください"
+      - "あたためます"
+      - "はいあたためてください"
+      - "そのままで"
+      - "そのままでいいです"
+      - "温めないで"
+      - "あたためないでください"
+      - "atatamete kudasai"
+      - "atatamemasu"
+      - "hai atatamete kudasai"
+      - "sono mama de"
+      - "sono mama de ii desu"
+      - "atatamenaide kudasai"
+  - id: points
+    prompt_en: "Say you do not have a point card."
+    coach_en: "You can say 持っていません or ポイントカードはないです."
+    accept:
+      - "持っていません"
+      - "もっていません"
+      - "ポイントカードはないです"
+      - "ポイントカードは持っていません"
+      - "ないです"
+      - "持ってないです"
+      - "motte imasen"
+      - "pointo kaado wa nai desu"
+      - "pointo kaado wa motte imasen"
+      - "nai desu"
+  - id: pay
+    prompt_en: "Pay by card, IC, or cash."
+    coach_en: "Say カードで, 現金で, or ICでお願いします."
+    slots:
+      method: card
+    accept:
+      - "カードで"
+      - "カードでお願いします"
+      - "現金で"
+      - "げんきんで"
+      - "現金でお願いします"
+      - "ICで"
+      - "アイシーで"
+      - "交通系で"
+      - "こうつうけいで"
+      - "kaado de"
+      - "kaado de onegaishimasu"
+      - "genkin de"
+      - "genkin de onegaishimasu"
+      - "ic de"
+      - "aishii de"
+      - "kotsukei de"
+key_phrases:
+  - ja: "お弁当をひとつください"
+    kana: "おべんとうをひとつください"
+    romaji: "obentou o hitotsu kudasai"
+    en: "One bento, please."
+  - ja: "温めてください"
+    kana: "あたためてください"
+    romaji: "atatamete kudasai"
+    en: "Please heat it."
+  - ja: "ポイントカードは持っていません"
+    kana: "ポイントカードはもっていません"
+    romaji: "pointo kaado wa motte imasen"
+    en: "I do not have a point card."
+  - ja: "カードでお願いします"
+    kana: "カードでおねがいします"
+    romaji: "kaado de onegaishimasu"
+    en: "By card, please."
+flow:
+  start: greet
+  nodes:
+    greet:
+      npc: "いらっしゃいませ。お弁当はいかがですか？"
+      npc_kana: "いらっしゃいませ。おべんとうはいかがですか？"
+      expects: order_bento
+      on_success: heat
+      on_other:
+        clarify: "お弁当をひとつですか？"
+        max_retries: 2
+    heat:
+      npc: "お弁当一つですね。温めますか？"
+      npc_kana: "おべんとうひとつですね。あたためますか？"
+      expects: heat
+      on_success: points
+      on_other:
+        clarify: "温めますか？それともそのままでいいですか？"
+        max_retries: 2
+    points:
+      npc: "ポイントカードはお持ちですか？"
+      npc_kana: "ポイントカードはおもちですか？"
+      expects: points
+      on_success: pay
+      on_other:
+        clarify: "ポイントカードはお持ちですか？"
+        max_retries: 2
+    pay:
+      npc: "430円です。お支払いはどうなさいますか？"
+      npc_kana: "よんひゃくさんじゅうえんです。おしはらいはどうなさいますか？"
+      expects: pay
+      npc_on_success: "ありがとうございました！"
+      npc_on_success_kana: "ありがとうございました！"
+      on_success: debrief
+      on_other:
+        clarify: "カード、現金、交通系のどれにしますか？"
+        max_retries: 2
+    debrief:
+      debrief: true
+      end: true
+      narration_en: "You answered the clerk and paid for the bento."
+success:
+  required: [order_bento, heat, points, pay]
+  stars:
+    3: "no hints above level default"
+    2: "one rung climbed"
+    1: "completed"
+srs_tags: [konbini, shopping, counters, payment]

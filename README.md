@@ -101,6 +101,54 @@ Push-to-talk bypasses Smart Turn as well. A hold from the model still cannot out
 
 Pressing talk (or starting a hands-free capture) stops NPC audio in the browser immediately. The same `audio_start` — and any new `turn` — cancels that session's in-flight server turn. ASR, LLM, and TTS awaits are aborted, the cancelled result is dropped, and scenario progress from that turn is rolled back. The latency log still records the turn with `"cancelled": true`. A turn that already delivered `turn_result` is left as-is; only playback stops.
 
+### End-to-end latency (M0-12)
+
+`scripts/e2e_latency.py` posts 16 kHz mono PCM16, waits for NPC WAV bytes, and prints ASR / LLM / TTS milliseconds plus wall-clock end-to-end time. p95 is over N turns (`--turns`, or `N`, default 10).
+
+```bash
+make e2e-latency
+# same command: orchestrator + speech-cpu stubs in this process
+.venv/bin/python scripts/e2e_latency.py
+
+# a stack that is already up (cpu profile listens on :8100)
+ORCH_URL=http://127.0.0.1:8100 .venv/bin/python scripts/e2e_latency.py
+
+# reference hardware: exit 1 unless p95 is under 2 s
+REAL=1 ORCH_URL=http://127.0.0.1:8100 .venv/bin/python scripts/e2e_latency.py
+```
+
+`pytest -m e2e_latency` runs a two-turn in-process check of that path. A plain `pytest` deselects the marker.
+
+The clock starts at `POST /sessions/{id}/turn`, after push-to-talk has ended the utterance, so VAD and Smart Turn are not inside the number. The spec budget ([docs/SPEC.md](docs/SPEC.md#latency-budget)) is:
+
+| Stage | Target | Ceiling |
+| --- | --- | --- |
+| End of speech (VAD + Smart Turn) | 250 ms | 500 ms |
+| Final ASR | 150 ms | 300 ms |
+| LLM first sentence | 350 ms | 700 ms |
+| TTS first audio | 150 ms | 300 ms |
+| **Total learner stop → NPC speaks** | **~1.0 s** | **~1.9 s** |
+
+On reference hardware (ASR/TTS on the RTX 3090 or DGX Spark, LLM on the LAN) `REAL=1` requires p95 under **2000 ms**, which is the M0 gate just above the ~1.9 s ceiling. CPU stubs and the mock LLM land in the tens of milliseconds; without `REAL=1` the script prints the comparison and still exits 0. No Spark or 3090 sample is checked in — run `REAL=1` on that machine when you want a recorded number.
+
+### Beginner accent fixtures (M0-13)
+
+`tests/fixtures/asr/` has eight clips (16 kHz mono PCM16, each under 100 KB) of phrases from `scenarios/restaurant_ramen_01.yaml` (`ふたりです`, `しょうゆラーメンをひとつ`, `お水をください`, and the other `accept` / `key_phrases` lines) plus `expected.json`. macOS Kyoko (`say -v Kyoko`) spoke them: a clear native stand-in until learner recordings replace the files. No model weights are committed.
+
+Regenerate on a Mac that has the Kyoko voice:
+
+```bash
+python scripts/regen_asr_fixtures.py
+```
+
+Score a live engine (skipped when `ASR_URL` is unset or `/health` does not answer):
+
+```bash
+ASR_URL=http://127.0.0.1:8101 python -m pytest -m accent orchestrator/tests/test_asr_accent.py
+```
+
+Each WAV is posted to `{ASR_URL}/v1/transcribe`. The score is word error rate on cutlet romaji tokens, so a kanji line and its kana reading can match. The test fails when mean WER is above **0.35**. The speech-cpu mock returns `ふたりです` for every clip and fails that bar. A default `pytest` deselects `accent`; it still checks that the checked-in WAVs are small 16 kHz mono PCM16 and that every expected line is in the ramen scenario.
+
 ## Repository layout
 
 ```

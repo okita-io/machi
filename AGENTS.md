@@ -195,11 +195,11 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
 | M3-01 | [ ] | Town map UI — pick building / locked scenarios | M1-07 | New route in `web/`; lists `GET /scenarios` |
-| M3-02 | [ ] | YAML: konbini checkout | S0-02 | Validates; playthrough with CPU or GPU stack |
-| M3-03 | [ ] | YAML: directions + **SVG mini-map** + ghost path | M3-01 | Hotspots + pin movement per NPC directions |
-| M3-04 | [ ] | YAML: coin laundry (signage goals) | S0-02 | Tappable hotspots from `scene.hotspots` |
-| M3-05 | [ ] | YAML: taxi | S0-02 | Win: arrive + pay |
-| M3-06 | [ ] | YAML: train ticket | S0-02 | Win: ticket + platform |
+| M3-02 | [x] | YAML: konbini checkout | S0-02 | Validates; playthrough with CPU or GPU stack |
+| M3-03 | [x] | YAML: directions + **SVG mini-map** + ghost path | M3-01 | Hotspots + pin movement per NPC directions |
+| M3-04 | [x] | YAML: coin laundry (signage goals) | S0-02 | Tappable hotspots from `scene.hotspots` |
+| M3-05 | [x] | YAML: taxi | S0-02 | Win: arrive + pay |
+| M3-06 | [x] | YAML: train ticket | S0-02 | Win: ticket + platform |
 | M3-07 | [ ] | Cross-scenario SRS weaving (failed phrase resurfaces) | M2-06, M3-02+ | Integration test with tagged cards |
 
 ---

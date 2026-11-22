@@ -1,0 +1,186 @@
+id: coin_laundry_01
+title:
+  en: "Coin laundry: washer 3"
+  ja: "コインランドリー"
+level: [1, 2, 3, 4]
+hint_defaults:
+  1: english
+  2: romaji
+  3: kana
+  4: none
+scene:
+  background: bg/laundry.webp
+  ambience: sfx/laundry_loop.ogg
+  hotspots:
+    - rect: [80, 200, 140, 180]
+      ja: "1番洗濯機"
+      kana: "いちばんせんたくき"
+      en: "Washer 1"
+      opens: washer_1
+    - rect: [240, 200, 140, 180]
+      ja: "2番洗濯機"
+      kana: "にばんせんたくき"
+      en: "Washer 2"
+      opens: washer_2
+    - rect: [400, 200, 140, 180]
+      ja: "3番洗濯機"
+      kana: "さんばんせんたくき"
+      en: "Washer 3"
+      opens: washer_3
+    - rect: [560, 120, 140, 90]
+      ja: "洗剤"
+      kana: "せんざい"
+      en: "Detergent"
+      opens: detergent
+npc:
+  id: attendant_kondo
+  role: "Laundry attendant, practical, points at machine numbers"
+  voice:
+    engine: qwen3_tts
+    speaker: Ono_Anna
+    style: "plain, helpful, steady"
+  register: polite_service
+  speed:
+    1: slow
+    2: natural
+    3: natural
+    4: fast
+guide:
+  id: sora
+  brief_en: "Find an open washer, say whether your load includes detergent, pay with coins, and start machine 3."
+  voice:
+    engine: irodori
+    design: "gentle young woman, warm, slightly playful"
+goals:
+  - id: ask_machine
+    prompt_en: "Ask which washing machine to use."
+    coach_en: "Ask 洗濯機はどこですか."
+    accept:
+      - "洗濯機はどこですか"
+      - "洗濯機はどこ"
+      - "せんたくきはどこですか"
+      - "せんたくきはどこ"
+      - "どの洗濯機ですか"
+      - "どのせんたくきですか"
+      - "空いている洗濯機はどこですか"
+      - "sentakuki wa doko desu ka"
+      - "sentakuki wa doko"
+      - "dono sentakuki desu ka"
+      - "aite iru sentakuki wa doko desu ka"
+  - id: detergent
+    prompt_en: "Say the load already has detergent (or that it does not)."
+    coach_en: "With detergent: 洗剤入りです. Without: 洗剤なしです."
+    accept:
+      - "洗剤入りです"
+      - "せんざいいりです"
+      - "洗剤入り"
+      - "洗剤なしです"
+      - "せんざいなしです"
+      - "洗剤は入っています"
+      - "せんざいははいっています"
+      - "senzai iri desu"
+      - "senzai iri"
+      - "senzai nashi desu"
+      - "senzai wa haitte imasu"
+  - id: pay_coins
+    prompt_en: "Pay one hundred yen in coins."
+    coach_en: "Say 100円です or コインで払います."
+    slots:
+      amount: 100
+      method: coin
+    accept:
+      - "100円です"
+      - "百円です"
+      - "ひゃくえんです"
+      - "コインで"
+      - "コインで払います"
+      - "こいで払います"
+      - "100円入れます"
+      - "ひゃくえんいれます"
+      - "hyaku en desu"
+      - "hyaku en iremasu"
+      - "koin de"
+      - "koin de haraimasu"
+  - id: start_machine
+    prompt_en: "Start washer number 3."
+    coach_en: "Say 3番をスタートします or スタートお願いします."
+    slots:
+      machine: 3
+    accept:
+      - "3番をスタートします"
+      - "三番をスタートします"
+      - "さんばんをスタートします"
+      - "スタートします"
+      - "スタートお願いします"
+      - "3番でお願いします"
+      - "さんばんでおねがいします"
+      - "sanban o sutaato shimasu"
+      - "san ban o sutaato shimasu"
+      - "sutaato shimasu"
+      - "sutaato onegaishimasu"
+      - "sanban de onegaishimasu"
+key_phrases:
+  - ja: "洗濯機はどこですか"
+    kana: "せんたくきはどこですか"
+    romaji: "sentakuki wa doko desu ka"
+    en: "Where is the washing machine?"
+  - ja: "洗剤入りです"
+    kana: "せんざいいりです"
+    romaji: "senzai iri desu"
+    en: "Detergent is already in."
+  - ja: "100円です"
+    kana: "ひゃくえんです"
+    romaji: "hyaku en desu"
+    en: "It is 100 yen."
+  - ja: "3番をスタートします"
+    kana: "さんばんをスタートします"
+    romaji: "sanban o sutaato shimasu"
+    en: "I will start number 3."
+flow:
+  start: greet
+  nodes:
+    greet:
+      npc: "いらっしゃいませ。洗濯機をお探しですか？"
+      npc_kana: "いらっしゃいませ。せんたくきをおさがしですか？"
+      expects: ask_machine
+      on_success: which
+      on_other:
+        clarify: "洗濯機はどこ、ですか？"
+        max_retries: 2
+    which:
+      npc: "空いているのは3番です。洗剤は入っていますか？"
+      npc_kana: "あいているのはさんばんです。せんざいははいっていますか？"
+      expects: detergent
+      on_success: coins
+      on_other:
+        clarify: "洗剤入りですか？洗剤なしですか？"
+        max_retries: 2
+    coins:
+      npc: "3番は100円です。コインをどうぞ。"
+      npc_kana: "さんばんはひゃくえんです。コインをどうぞ。"
+      expects: pay_coins
+      on_success: start
+      on_other:
+        clarify: "100円、コインでお願いします。"
+        max_retries: 2
+    start:
+      npc: "入りました。3番のスタートを押してください。"
+      npc_kana: "はいりました。さんばんのスタートをおしてください。"
+      expects: start_machine
+      npc_on_success: "3番、回り始めましたよ。"
+      npc_on_success_kana: "さんばん、まわりはじめましたよ。"
+      on_success: debrief
+      on_other:
+        clarify: "3番をスタートしてください。"
+        max_retries: 2
+    debrief:
+      debrief: true
+      end: true
+      narration_en: "Washer 3 is running."
+success:
+  required: [ask_machine, detergent, pay_coins, start_machine]
+  stars:
+    3: "no hints above level default"
+    2: "one rung climbed"
+    1: "completed"
+srs_tags: [laundry, machines, coins, signage]

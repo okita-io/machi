@@ -1,0 +1,185 @@
+id: train_ticket_01
+title:
+  en: "Train ticket: Shinagawa"
+  ja: "切符"
+level: [1, 2, 3, 4]
+hint_defaults:
+  1: english
+  2: romaji
+  3: kana
+  4: none
+scene:
+  background: bg/ticket_window.webp
+  ambience: sfx/station_loop.ogg
+  hotspots:
+    - rect: [60, 160, 200, 220]
+      ja: "券売機"
+      kana: "けんばいき"
+      en: "Ticket machine"
+      opens: ticket_machine
+    - rect: [520, 140, 240, 200]
+      ja: "窓口"
+      kana: "まどぐち"
+      en: "Ticket window"
+    - rect: [300, 40, 180, 70]
+      ja: "4番線"
+      kana: "よんばんせん"
+      en: "Platform 4"
+      opens: platform_4
+npc:
+  id: clerk_hayashi
+  role: "Station ticket clerk, precise, used to short requests"
+  voice:
+    engine: qwen3_tts
+    speaker: Ono_Anna
+    style: "clear, brisk, polite"
+  register: polite_service
+  speed:
+    1: slow
+    2: natural
+    3: natural
+    4: fast
+guide:
+  id: sora
+  brief_en: "Buy one ticket to Shinagawa, confirm 180 yen, pay, and ask which platform to use."
+  voice:
+    engine: irodori
+    design: "gentle young woman, warm, slightly playful"
+goals:
+  - id: ticket
+    prompt_en: "Ask for a ticket to Shinagawa."
+    coach_en: "Say 品川までお願いします."
+    slots:
+      destination: shinagawa
+      qty: 1
+    accept:
+      - "品川までお願いします"
+      - "品川まで"
+      - "しながわまでおねがいします"
+      - "しながわまで"
+      - "品川まで一枚"
+      - "しながわまでいちまい"
+      - "品川、一枚お願いします"
+      - "しながわ、いちまいおねがいします"
+      - "shinagawa made onegaishimasu"
+      - "shinagawa made"
+      - "sinagawa made onegaishimasu"
+      - "shinagawa made ichimai"
+  - id: fare
+    prompt_en: "Confirm the fare is 180 yen."
+    coach_en: "Repeat the price: 180円ですね."
+    slots:
+      fare: 180
+    accept:
+      - "180円ですね"
+      - "百八十円ですね"
+      - "ひゃくはちじゅうえんですね"
+      - "ひゃくはちじゅうえんです"
+      - "180円です"
+      - "はい、180円"
+      - "はい、ひゃくはちじゅうえん"
+      - "hyaku hachijuu en desu ne"
+      - "hyaku hachijuu en desu"
+      - "hyakuhachijuu en desu ne"
+      - "hai hyaku hachijuu en"
+  - id: pay
+    prompt_en: "Pay for the ticket with cash or IC."
+    coach_en: "Say 現金で or ICでお願いします."
+    slots:
+      method: cash
+    accept:
+      - "現金で"
+      - "げんきんで"
+      - "現金でお願いします"
+      - "げんきんでおねがいします"
+      - "ICで"
+      - "アイシーで"
+      - "交通系で"
+      - "こうつうけいで"
+      - "ICでお願いします"
+      - "genkin de"
+      - "genkin de onegaishimasu"
+      - "ic de"
+      - "ic de onegaishimasu"
+      - "kotsukei de"
+  - id: platform
+    prompt_en: "Ask which platform the train leaves from."
+    coach_en: "Ask 何番線ですか."
+    accept:
+      - "何番線ですか"
+      - "なんばんせんですか"
+      - "何番線"
+      - "なんばんせん"
+      - "何番線でしょうか"
+      - "なんばんせんでしょうか"
+      - "ホームは何番ですか"
+      - "ほーむはなんばんですか"
+      - "nanban sen desu ka"
+      - "nan ban sen desu ka"
+      - "nanbansen desu ka"
+      - "hoomu wa nanban desu ka"
+key_phrases:
+  - ja: "品川までお願いします"
+    kana: "しながわまでおねがいします"
+    romaji: "shinagawa made onegaishimasu"
+    en: "To Shinagawa, please."
+  - ja: "180円ですね"
+    kana: "ひゃくはちじゅうえんですね"
+    romaji: "hyaku hachijuu en desu ne"
+    en: "180 yen, right?"
+  - ja: "現金でお願いします"
+    kana: "げんきんでおねがいします"
+    romaji: "genkin de onegaishimasu"
+    en: "Cash, please."
+  - ja: "何番線ですか"
+    kana: "なんばんせんですか"
+    romaji: "nanban sen desu ka"
+    en: "Which platform?"
+flow:
+  start: greet
+  nodes:
+    greet:
+      npc: "いらっしゃいませ。どちらまでですか？"
+      npc_kana: "いらっしゃいませ。どちらまでですか？"
+      expects: ticket
+      on_success: fare
+      on_other:
+        clarify: "どちらまでの切符ですか？"
+        max_retries: 2
+    fare:
+      npc: "品川まで180円です。よろしいですか？"
+      npc_kana: "しながわまでひゃくはちじゅうえんです。よろしいですか？"
+      expects: fare
+      on_success: pay
+      on_other:
+        clarify: "品川まで180円ですよ。"
+        max_retries: 2
+    pay:
+      npc: "お支払いは現金ですか、ICですか？"
+      npc_kana: "おしはらいはげんきんですか、アイシーですか？"
+      expects: pay
+      on_success: platform
+      on_other:
+        clarify: "現金ですか？ICですか？"
+        max_retries: 2
+    platform:
+      npc: "切符をどうぞ。ほかに何かありますか？"
+      npc_kana: "きっぷをどうぞ。ほかになにかありますか？"
+      expects: platform
+      npc_on_success: "品川は4番線です。"
+      npc_on_success_kana: "しながわはよんばんせんです。"
+      on_success: debrief
+      on_other:
+        clarify: "番線をお調べしましょうか？"
+        max_retries: 2
+    debrief:
+      debrief: true
+      end: true
+      narration_en: "You have a Shinagawa ticket and the platform number."
+success:
+  required: [ticket, fare, pay, platform]
+  stars:
+    3: "no hints above level default"
+    2: "one rung climbed"
+    1: "completed"
+srs_tags: [train, tickets, station, platform]

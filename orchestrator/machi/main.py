@@ -32,6 +32,7 @@ from machi.llm import LlmClient, render_prompt
 from machi.nlp import build_ruby_html, to_romaji
 from machi.npc_audio import cached_npc_wav
 from machi.scenario_loader import load_all_scenarios
+from machi.schema import ScenarioSpec
 from machi.session import (
     PHASE_BRIEFING,
     PHASE_DEBRIEF,
@@ -149,10 +150,27 @@ async def health() -> dict[str, Any]:
     }
 
 
+def _asset_url(path: str) -> str:
+    return f"{settings.assets_base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _guide_sprite(spec: ScenarioSpec) -> str:
+    return spec.scene.sprite or spec.guide.sprite or "sprites/sora/neutral.webp"
+
+
 @app.get("/scenarios")
-async def list_scenarios() -> list[dict[str, str]]:
+async def list_scenarios() -> list[dict[str, Any]]:
+    """Scenario cards for the town map: id, titles, and scene art paths."""
     return [
-        {"id": s.id, "title_en": s.title.en, "title_ja": s.title.ja}
+        {
+            "id": s.id,
+            "title_en": s.title.en,
+            "title_ja": s.title.ja,
+            "scene": {
+                "background": _asset_url(s.scene.background),
+                "sprite": _asset_url(_guide_sprite(s)),
+            },
+        }
         for s in SCENARIOS.values()
     ]
 
@@ -181,8 +199,8 @@ async def create_session(body: CreateSessionRequest) -> dict[str, Any]:
         "level": state.level,
         "node_id": state.node_id,
         "scene": {
-            "background": f"{settings.assets_base_url}/{spec.scene.background}",
-            "guide_sprite": f"{settings.assets_base_url}/sprites/sora_neutral.svg",
+            "background": _asset_url(spec.scene.background),
+            "guide_sprite": _asset_url(_guide_sprite(spec)),
         },
         "opening_npc": enrich_line(npc_ja, npc_kana),
         "phase": state.phase,

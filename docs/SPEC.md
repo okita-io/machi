@@ -60,6 +60,8 @@
 
 Neighborhood files: `scenarios/konbini_checkout_01.yaml`, `scenarios/directions_01.yaml`, `scenarios/coin_laundry_01.yaml`, `scenarios/taxi_01.yaml`, `scenarios/train_ticket_01.yaml`. Each lists levels 1–4 with the default hint from the table below (`hint_defaults`). Directions adds hotspot `x`/`y` pins and `scene.ghost_path`, an SVG polyline the map UI can draw later. The street background is `bg/street.webp`.
 
+Scene plates live under `assets/bg/` (`ramen`, `konbini`, `street`, `laundry`, `taxi`, `station`, `town_map` as `.webp`). Sora's expression plates are `assets/sprites/sora/{neutral,happy,think,cheer,surprised,sorry,point}.webp` on a green screen; the browser keys that green to alpha once per loaded file. `neutral.webp` is the resting face. `GET /scenarios` lists id, titles, and scene art (asset URLs). The town view (`#/town`) draws `town_map.webp` with a hotspot per building. The ramen shop is `restaurant_ramen_01`. A scenario with no hotspot stays locked.
+
 ### Levels and hint ladder
 
 | Level | Default hint |

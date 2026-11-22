@@ -9,7 +9,8 @@ hint_defaults:
   3: kana
   4: none
 scene:
-  background: bg/taxi_rank.webp
+  background: bg/taxi.webp
+  sprite: sprites/sora/neutral.webp
   ambience: sfx/traffic_loop.ogg
   hotspots:
     - rect: [420, 260, 220, 140]
@@ -36,6 +37,7 @@ npc:
     4: fast
 guide:
   id: sora
+  sprite: sprites/sora/neutral.webp
   brief_en: "Hail the cab, say you are going to the station, agree to the route and the fare, then pay with IC or cash when you arrive."
   voice:
     engine: irodori

@@ -9,7 +9,8 @@ hint_defaults:
   3: kana
   4: none
 scene:
-  background: bg/konbini_counter.webp
+  background: bg/konbini.webp
+  sprite: sprites/sora/neutral.webp
   ambience: sfx/konbini_loop.ogg
   hotspots:
     - rect: [640, 220, 280, 200]
@@ -35,6 +36,7 @@ npc:
     4: fast
 guide:
   id: sora
+  sprite: sprites/sora/neutral.webp
   brief_en: "You are at the register with one bento. Say what you want, answer the heat question, say you have no point card, and pay."
   voice:
     engine: irodori

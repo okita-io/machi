@@ -38,6 +38,19 @@ export type CorrectionCard = {
   ruby_html: string;
 };
 
+export type ScenarioSummary = {
+  id: string;
+  title_en: string;
+  title_ja: string;
+  scene: { background: string; sprite: string };
+};
+
+export async function listScenarios(): Promise<ScenarioSummary[]> {
+  const r = await fetch(`${API_BASE}/scenarios`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 export async function createSession(scenarioId: string, level = 1): Promise<SessionStart> {
   const r = await fetch(`${API_BASE}/sessions`, {
     method: "POST",

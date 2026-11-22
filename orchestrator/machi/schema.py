@@ -25,6 +25,8 @@ class Hotspot(BaseModel):
 
 class SceneSpec(BaseModel):
     background: str
+    # Resting Sora plate. The web swaps sprites/sora/{expression}.webp from this path.
+    sprite: str = "sprites/sora/neutral.webp"
     ambience: str | None = None
     hotspots: list[Hotspot] = Field(default_factory=list)
     # SVG polyline ("x,y x,y ...") the town UI draws as the ghost path.
@@ -50,6 +52,7 @@ class GuideSpec(BaseModel):
     id: str
     voice: VoiceSpec
     brief_en: str | None = None
+    sprite: str | None = None
 
 
 class GoalSpec(BaseModel):

@@ -10,7 +10,7 @@ Full product and technical spec: [docs/SPEC.md](docs/SPEC.md).
 | --- | --- |
 | Web | Vite + React + TypeScript |
 | Orchestrator | Python 3.12, FastAPI, WebSocket/REST, OpenAI SDK |
-| Text tools | [cutlet](https://github.com/polm/cutlet) (MIT romaji); furigana from scenario readings in CPU demo |
+| Text tools | Optional `pip install -e ".[nlp]"` for [cutlet](https://github.com/polm/cutlet) (MIT romaji); furigana from scenario readings in CPU demo |
 | Scenario data | YAML + Pydantic validation |
 | Progress | SQLite file on `./data` volume |
 | CPU speech | `speech-cpu` mock ASR + stub WAV TTS |

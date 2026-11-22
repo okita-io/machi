@@ -223,6 +223,7 @@ async def _session_turn_pipeline(
         else:
             npc_ja, npc_kana = node.npc or "", node.npc_kana
 
+    scripted_ja = npc_ja
     npc_system = f"You are {state.scenario.npc.role}. Speak only Japanese, one short line."
     npc_user = f"Learner said: {utterance}. Respond in character."
     coach = default_tutor_payload(
@@ -233,7 +234,7 @@ async def _session_turn_pipeline(
     tutor_system = "You are Sora the tutor. Return JSON with goal_hits, coach_note_en, hint_rung."
     tutor_user = f"Utterance: {utterance}; hits: {goal_hits}"
     with timer.measure(STAGE_LLM):
-        npc_ja = await LLM.npc_reply(system=npc_system, user=npc_user, fallback_line=npc_ja)
+        npc_ja = await LLM.npc_reply(system=npc_system, user=npc_user, fallback_line=scripted_ja)
         coach = await LLM.tutor_json(system=tutor_system, user=tutor_user, fallback=coach)
 
     try:
@@ -246,8 +247,10 @@ async def _session_turn_pipeline(
         "session_id": state.id,
         "node_id": state.node_id,
         "learner_text": utterance,
+        "learner": enrich_line(utterance, None),
         "goal_hits": goal_hits,
-        "npc": enrich_line(npc_ja, npc_kana),
+        # npc_kana matches the scripted line only. A live rewrite gets token ruby.
+        "npc": enrich_line(npc_ja, npc_kana if npc_ja == scripted_ja else None),
         "coach": coach,
         "tts_audio_b64": base64.b64encode(audio).decode("ascii"),
         "completed_goals": sorted(state.completed_goals),

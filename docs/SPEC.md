@@ -128,7 +128,7 @@ Two LLM roles per turn:
 
 Goal checks: fuzzy `accept` lists first, then LLM judgment.
 
-NPC lines are enriched with furigana/romaji via text tools, not from the LLM.
+NPC and learner lines are enriched with furigana and romaji via text tools, not from the LLM. Furigana is per-token ruby from fugashi + unidic-lite (`ruby_for_text`). A scenario `npc_kana` value is an optional whole-line override, used only when the spoken text still matches the scripted line. Romaji is cutlet Hepburn for any Japanese, including kanji. The web subtitle shows that romaji row for both the NPC line and the learner line when the hint level is 2 or higher. The level control defaults to 2. cutlet, fugashi, and unidic-lite are default orchestrator dependencies. If those imports fail, the original text is kept.
 
 ## Milestones
 

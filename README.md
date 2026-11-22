@@ -10,7 +10,7 @@ Full product and technical spec: [docs/SPEC.md](docs/SPEC.md).
 | --- | --- |
 | Web | Vite + React + TypeScript |
 | Orchestrator | Python 3.12, FastAPI, WebSocket/REST, OpenAI SDK |
-| Text tools | Optional `pip install -e ".[nlp]"` for [cutlet](https://github.com/polm/cutlet) (MIT romaji); furigana from scenario readings in CPU demo |
+| Text tools | [cutlet](https://github.com/polm/cutlet) romaji and fugashi + unidic-lite furigana (MIT / BSD), default in the orchestrator image. `npc_kana` in YAML is an optional whole-line override |
 | Scenario data | YAML + Pydantic validation |
 | Progress | SQLite file on `./data` volume |
 | CPU speech | `speech-cpu` mock ASR + stub WAV TTS |
@@ -121,8 +121,8 @@ docker-compose.yml
 | Scenario schema + restaurant YAML | Real |
 | Flow / goal matching | Real |
 | SQLite session logging | Real (minimal) |
-| Romaji (cutlet) | Real |
-| Furigana | From scenario kana in demo; fugashi/pyopenjtalk in M1 |
+| Romaji (cutlet) | Real for NPC and learner lines. The web UI shows the romaji row when the hint level is 2 or higher (selector defaults to 2) |
+| Furigana | Per-token ruby from fugashi + unidic-lite for any line. Scenario `npc_kana` overrides that reading when the spoken line still matches the script |
 | Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks and waits for `turn` |
 | Turn pipeline | Audio-only `audio_b64` (REST or WebSocket) runs ASR → LLM → TTS. Typed text skips ASR |
 | Hands-free | Silero VAD + silence heuristic (500 ms ceiling). Smart Turn v3 optional |
@@ -136,7 +136,7 @@ docker-compose.yml
 
 1. **M0** — Stream a real ASR (`asr/`) on the PCM the VAD already commits.
 2. **GPU ASR/TTS** — Implement `asr` and `tts` services with Qwen3 or Kokoro on the `cpu`/`spark` profiles.
-3. **M1** — Hint ladder UI, coach drawer, debrief screen, fugashi + unidic-lite furigana for any line.
+3. **M1** — Hint ladder UI, coach drawer, debrief screen. Furigana and the level-2 romaji row are in place.
 4. **Assets** — ComfyUI bake script for WebP backgrounds and Sora expression sheet.
 
 ## License

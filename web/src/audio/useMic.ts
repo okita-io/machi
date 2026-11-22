@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { TurnResult } from "../api";
 import { MicCapture, micErrorMessage } from "./capture";
+import { pcmChunksToBase64 } from "./pcm";
 import { stopPlayback } from "./playback";
 import { encodeControl, sessionWsUrl } from "./socket";
 
@@ -22,6 +23,8 @@ export function useMic(
   handsFree: boolean,
   onTurn: (result: TurnResult) => void,
   hintMaxRef?: { current: Record<string, number> },
+  reviewActive = false,
+  onReviewAudio?: (audioB64: string) => void | Promise<void>,
 ) {
   const [recording, setRecording] = useState(false);
   const [sending, setSending] = useState(false);
@@ -33,12 +36,17 @@ export function useMic(
   const captureRef = useRef<MicCapture | null>(null);
   const handsFreeRef = useRef(handsFree);
   const onTurnRef = useRef(onTurn);
+  const reviewActiveRef = useRef(reviewActive);
+  const onReviewAudioRef = useRef(onReviewAudio);
+  const reviewChunksRef = useRef<Uint8Array[]>([]);
   const pressedRef = useRef(false);
   const sentStartRef = useRef(false);
   const seqRef = useRef(0);
   const opRef = useRef<Promise<void>>(Promise.resolve());
   handsFreeRef.current = handsFree;
   onTurnRef.current = onTurn;
+  reviewActiveRef.current = reviewActive;
+  onReviewAudioRef.current = onReviewAudio;
 
   useEffect(() => {
     if (!sessionId) return;
@@ -74,6 +82,14 @@ export function useMic(
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    if (reviewActive) {
+      setReady(true);
+      return;
+    }
+    setReady(wsRef.current?.readyState === WebSocket.OPEN);
+  }, [reviewActive]);
+
   function enqueue(task: () => Promise<void>) {
     opRef.current = opRef.current.then(task).catch((err: unknown) => {
       setError(micErrorMessage(err));
@@ -83,15 +99,17 @@ export function useMic(
   }
 
   function holdStart() {
-    if (pressedRef.current || !sessionId) return;
+    const review = reviewActiveRef.current;
+    if (pressedRef.current || (!review && !sessionId)) return;
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
+    if (!review && (!ws || ws.readyState !== WebSocket.OPEN)) {
       setError("Session WebSocket is not connected");
       return;
     }
     stopPlayback();
     pressedRef.current = true;
     sentStartRef.current = false;
+    reviewChunksRef.current = [];
     const gen = ++seqRef.current;
     const capture = new MicCapture();
     captureRef.current = capture;
@@ -100,20 +118,27 @@ export function useMic(
       if (seqRef.current !== gen) return;
       try {
         await capture.prepare();
-        if (seqRef.current !== gen || ws.readyState !== WebSocket.OPEN) {
+        const live = reviewActiveRef.current;
+        if (seqRef.current !== gen || (!live && ws?.readyState !== WebSocket.OPEN)) {
           await capture.stop();
           return;
         }
-        ws.send(
-          encodeControl({
-            type: "audio_start",
-            hands_free: handsFreeRef.current,
-            hint_max: hintMaxRef?.current ?? {},
-          }),
-        );
+        if (!live && ws) {
+          ws.send(
+            encodeControl({
+              type: "audio_start",
+              hands_free: handsFreeRef.current,
+              hint_max: hintMaxRef?.current ?? {},
+            }),
+          );
+        }
         sentStartRef.current = true;
         capture.connect((frame) => {
-          if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+          if (reviewActiveRef.current) {
+            reviewChunksRef.current.push(frame.slice());
+            return;
+          }
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(frame);
         });
         setFrames(0);
         setRecording(true);
@@ -131,12 +156,24 @@ export function useMic(
     pressedRef.current = false;
     seqRef.current += 1;
     const ws = wsRef.current;
+    const review = reviewActiveRef.current;
     enqueue(async () => {
       setRecording(false);
       await captureRef.current?.stop();
       captureRef.current = null;
+      const chunks = reviewChunksRef.current;
+      reviewChunksRef.current = [];
       if (!sentStartRef.current) return;
       sentStartRef.current = false;
+      if (review) {
+        setSending(true);
+        try {
+          await onReviewAudioRef.current?.(pcmChunksToBase64(chunks));
+        } finally {
+          setSending(false);
+        }
+        return;
+      }
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         setSending(false);
         setError("Session WebSocket is not connected");

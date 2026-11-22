@@ -6,6 +6,7 @@ export function BriefingScreen({
   title,
   goals,
   phrases,
+  reviewsLine,
   hearing,
   onHear,
   onStart,
@@ -13,6 +14,7 @@ export function BriefingScreen({
   title: string;
   goals: GoalStatus[];
   phrases: KeyPhrase[];
+  reviewsLine?: string;
   hearing: boolean;
   onHear: (text: string) => void;
   onStart: () => void;
@@ -21,6 +23,7 @@ export function BriefingScreen({
     <section className="flow-panel" data-screen="briefing">
       <p className="hint-kicker">Briefing · Sora</p>
       <h2>{title}</h2>
+      {reviewsLine ? <p className="reviews-line">{reviewsLine}</p> : null}
       <ul className="goal-list">
         {goals.map((goal) => (
           <li key={goal.id}>

@@ -114,3 +114,20 @@ export function consumePcmFrames(
     pending: { samples: kept, phase: nextPos - drop },
   };
 }
+
+/** Join captured Int16 frames into standard base64 for a REST review answer. */
+export function pcmChunksToBase64(chunks: Uint8Array[]): string {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let binary = "";
+  const step = 0x8000;
+  for (let index = 0; index < merged.length; index += step) {
+    binary += String.fromCharCode(...merged.subarray(index, index + step));
+  }
+  return btoa(binary);
+}

@@ -233,7 +233,12 @@ def test_two_misses_outrank_single_miss_and_store_ruby(tmp_path, monkeypatch):
         cards = due.json()["cards"]
         match = next(card for card in cards if card["correction_ja"] == "カードで大丈夫ですか")
         assert match["state"] == "new"
-        assert match["srs_tags"] == ["restaurant", "counters", "polite_requests"]
+        assert match["srs_tags"] == [
+            "restaurant",
+            "counters",
+            "polite_requests",
+            "ordering",
+        ]
         assert "二人です" in [card["correction_ja"] for card in cards]
 
         reviewed = client.post("/reviews", json={"card_id": match["card_id"], "rating": "good"})
@@ -283,4 +288,4 @@ def test_warmup_miss_persists_the_key_phrase(tmp_path, monkeypatch):
     assert "futari" in row["romaji"]
     assert "ふたり" in row["kana_ruby"]
     assert "<ruby>" in row["kana_ruby"]
-    assert row["srs_tags"] == "restaurant,counters,polite_requests"
+    assert row["srs_tags"] == "restaurant,counters,polite_requests,ordering"

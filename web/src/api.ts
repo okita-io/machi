@@ -31,6 +31,54 @@ export type SessionStart = {
   title_en?: string;
   required_goals?: string[];
   briefing_en?: string;
+  reviews_line?: string;
+  review_phrases?: KeyPhrase[];
+  warmup_total?: number;
+};
+
+export type ReviewCard = {
+  card_id: number;
+  ja: string;
+  en: string;
+  romaji: string;
+  kana_ruby: string;
+  srs_tags: string[];
+};
+
+export type ReviewGrade = "again" | "hard" | "good" | "easy";
+
+export type ReviewLast = {
+  card_id: number;
+  utterance: string;
+  match: ReviewGrade;
+  rating: ReviewGrade;
+  phrase_ja: string;
+  reps: number;
+  due_at: string;
+};
+
+export type ReviewSummary = {
+  cards_reviewed: number;
+  next_due: {
+    card_id: number;
+    due_at: string;
+    rating: string;
+    phrase_ja: string;
+    reps: number;
+  }[];
+};
+
+export type ReviewSessionView = {
+  review_id: string;
+  budget_s: number;
+  index: number;
+  card_total: number;
+  complete: boolean;
+  situation: string;
+  situation_tag: string;
+  card: ReviewCard | null;
+  last: ReviewLast | null;
+  summary: ReviewSummary | null;
 };
 
 export type CorrectionCard = {
@@ -138,6 +186,25 @@ export async function synthesizeSpeech(text: string, voice = "guide"): Promise<s
   const body = (await r.json()) as { audio_b64?: string };
   if (!body.audio_b64) throw new Error("tts_empty");
   return body.audio_b64;
+}
+
+export async function startReviewSession(): Promise<ReviewSessionView> {
+  const r = await fetch(`${API_BASE}/review/sessions`, { method: "POST" });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function answerReview(
+  reviewId: string,
+  body: { text?: string; audio_b64?: string; self_rating?: ReviewGrade },
+): Promise<ReviewSessionView> {
+  const r = await fetch(`${API_BASE}/review/sessions/${reviewId}/answer`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
 }
 
 /** Idempotent. Completing a visit already enrolls the same corrections. */

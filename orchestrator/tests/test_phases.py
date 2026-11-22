@@ -57,18 +57,24 @@ def test_turn_does_not_score_until_warmup_completes():
         assert opened.json()["goal_hits"] == []
 
         phrases = body["key_phrases"]
+        review_phrases = body.get("review_phrases") or []
+        queue = phrases + review_phrases
+        assert opened.json()["warmup_total"] == len(queue)
         last = None
-        for index, phrase in enumerate(phrases):
-            text = phrase["kana"] if index % 2 == 0 else "zzz"
+        for index, phrase in enumerate(queue):
+            if index < len(phrases):
+                text = phrase["kana"] if index % 2 == 0 else "zzz"
+            else:
+                text = phrase["ja"]
             last = client.post(f"/sessions/{sid}/turn", json={"text": text})
             assert last.status_code == 200
             step = last.json()
             assert step["goal_hits"] == []
             assert step["completed_goals"] == []
             assert step["node_id"] == "greet"
-            if index % 2 == 0:
+            if index < len(phrases) and index % 2 == 0:
                 assert step["warmup_passed"] is True
-            else:
+            elif index < len(phrases):
                 assert step["warmup_passed"] is False
 
         assert last is not None

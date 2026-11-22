@@ -193,7 +193,7 @@ docker-compose.yml
 | LLM | Live when `LLM_BASE_URL` set; else mock |
 | Lip flap and hint ladder | In the scene |
 | Briefing, warm-up, debrief | Sora briefing, one lenient attempt per key phrase, debrief after pay |
-| FSRS | Real. In-tree FSRS-4.5 (`orchestrator/machi/fsrs.py`, no extra package). Completing a visit enrolls correction cards. `GET /reviews/next` lists due cards; `POST /reviews` rates again/hard/good/easy |
+| FSRS | Real. In-tree FSRS-4.5 (`orchestrator/machi/fsrs.py`, no extra package). Completing a visit enrolls correction cards. `GET /reviews/next` lists due cards; `POST /reviews` rates again/hard/good/easy. A new visit weaves up to two due cards that share a scenario tag into Sora's briefing and the warm-up. `POST /review/sessions` starts a two-minute spoken review (REST); `POST /review/sessions/{id}/answer` takes typed text or `audio_b64` |
 
 ## Suggested next steps
 

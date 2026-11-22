@@ -176,4 +176,4 @@ success:
     3: "no hints above level default"
     2: "one rung climbed"
     1: "completed"
-srs_tags: [konbini, shopping, counters, payment]
+srs_tags: [konbini, shopping, counters, payment, ordering]

@@ -6,6 +6,7 @@ import {
   floatSampleToInt16,
   FRAME_BYTES,
   FRAME_SAMPLES,
+  pcmChunksToBase64,
   pcmFrameLogEnabled,
   sliceFloat32ToInt16Frames,
 } from "./pcm.ts";
@@ -79,6 +80,12 @@ test("session websocket url stays on the page host", () => {
     }),
     "ws://localhost:8100/ws/abc",
   );
+});
+
+test("pcm chunks become standard base64", () => {
+  const bytes = new Uint8Array([0, 1, 2, 255]);
+  assert.equal(pcmChunksToBase64([bytes.subarray(0, 2), bytes.subarray(2)]), "AAEC/w==");
+  assert.equal(pcmChunksToBase64([]), "");
 });
 
 test("worklet source registers the capture processor", () => {

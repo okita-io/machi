@@ -78,6 +78,47 @@ def match_goal(utterance: str, accept: list[str]) -> bool:
     return False
 
 
+def match_strength(utterance: str, accept: list[str]) -> str:
+    """FSRS grade from a spoken line: ``good``, ``hard`` (a fragment), or ``again``.
+
+    Saying the whole accept phrase, plus extra words, is ``good``. A shorter
+    piece of that phrase is ``hard``. Unrelated text is ``again``.
+    """
+    normalized = _normalize(utterance)
+    if not normalized:
+        return "again"
+    partial = False
+    for phrase in accept:
+        target = _normalize(phrase)
+        if len(target) < 2:
+            continue
+        if normalized == target or target in normalized:
+            return "good"
+        if len(normalized) >= 2 and normalized in target:
+            partial = True
+            continue
+        span = _longest_common_substring(normalized, target)
+        if span >= 2 and span / len(target) >= 0.4:
+            partial = True
+    return "hard" if partial else "again"
+
+
+def _longest_common_substring(left: str, right: str) -> int:
+    if not left or not right:
+        return 0
+    best = 0
+    prev = [0] * (len(right) + 1)
+    for char in left:
+        current = [0] * (len(right) + 1)
+        for index, other in enumerate(right, start=1):
+            if char == other:
+                current[index] = prev[index - 1] + 1
+                if current[index] > best:
+                    best = current[index]
+        prev = current
+    return best
+
+
 def _get_tagger() -> object | None:
     global _tagger, _tagger_failed
     if _tagger_failed:

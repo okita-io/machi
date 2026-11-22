@@ -2,15 +2,18 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { playNpcAudio } from "./audio/playback";
 import { useMic } from "./audio/useMic";
 import {
+  answerReview,
   createSession,
   enrollReviews,
   fetchCoach,
   listScenarios,
   sendTurn,
+  startReviewSession,
   synthesizeSpeech,
   type CoachPayload,
   type KeyPhrase,
   type NpcLine,
+  type ReviewSessionView,
   type ScenarioSummary,
   type SessionStart,
   type TurnResult,
@@ -38,6 +41,7 @@ import { bestCorrections, goalChecklist, turnKind, type Phase } from "./flow";
 import { KeyedSprite } from "./KeyedSprite";
 import type { MouthFrame } from "./mouth";
 import { BriefingScreen, DebriefScreen, WarmupScreen } from "./phases";
+import { ReviewPanel } from "./review";
 import { advisoryLine, type PitchAdvisory } from "./pitchAdvisory";
 import { type SoraExpression, soraSpriteUrl } from "./soraExpressions";
 import { townMapUrl } from "./townMap";
@@ -119,12 +123,19 @@ export default function App() {
   const [warmupIndex, setWarmupIndex] = useState(0);
   const [debrief, setDebrief] = useState<TurnResult | null>(null);
   const [reviewsNote, setReviewsNote] = useState<string | null>(null);
+  const [warmupTotal, setWarmupTotal] = useState(0);
+  const [review, setReview] = useState<ReviewSessionView | null>(null);
+  const [reviewInput, setReviewInput] = useState("");
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [pitchAdvisory, setPitchAdvisory] = useState<PitchAdvisory | null>(null);
+  const reviewIdRef = useRef<string | null>(null);
   const hintMaxRef = useRef<Record<string, number>>({});
   const sessionIdRef = useRef<string | null>(null);
 
   hintMaxRef.current = ladder?.hintMax ?? {};
   sessionIdRef.current = session?.session_id ?? null;
+  reviewIdRef.current = review && !review.complete ? review.review_id : null;
 
   const onMouth = useCallback((frame: MouthFrame) => {
     setMouth((prev) => (prev === frame ? prev : frame));
@@ -163,6 +174,7 @@ export default function App() {
         setPhase(done ? "roleplay" : "warmup");
         setWarmupPhrase(done ? null : result.next_phrase ?? result.phrase ?? null);
         setWarmupIndex(result.warmup_index ?? 0);
+        if (typeof result.warmup_total === "number") setWarmupTotal(result.warmup_total);
         setCoachPending(false);
         setCoach(result.coach);
         if (done) setInput("ふたりです");
@@ -198,7 +210,29 @@ export default function App() {
     [onMouth],
   );
 
-  const mic = useMic(session?.session_id ?? null, handsFree, applyTurn, hintMaxRef);
+  const reviewActive = route === "town" && review !== null && !review.complete;
+  const onReviewAudio = useCallback(async (audioB64: string) => {
+    const id = reviewIdRef.current;
+    if (!id) return;
+    setReviewBusy(true);
+    setReviewError(null);
+    try {
+      setReview(await answerReview(id, audioB64 ? { audio_b64: audioB64 } : { text: "" }));
+      setReviewInput("");
+    } catch {
+      setReviewError("Couldn't score that.");
+    } finally {
+      setReviewBusy(false);
+    }
+  }, []);
+  const mic = useMic(
+    session?.session_id ?? null,
+    handsFree,
+    applyTurn,
+    hintMaxRef,
+    reviewActive,
+    onReviewAudio,
+  );
 
   useEffect(() => {
     let cancel = false;
@@ -215,6 +249,7 @@ export default function App() {
       setPhase(s.phase ?? "briefing");
       setWarmupPhrase(null);
       setWarmupIndex(0);
+      setWarmupTotal(s.warmup_total ?? s.key_phrases.length);
       setDebrief(null);
       setReviewsNote(null);
       setPitchAdvisory(null);
@@ -290,6 +325,34 @@ export default function App() {
       applyTurn(await sendTurn(session.session_id, input, hintMaxRef.current));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function startReview() {
+    setReviewBusy(true);
+    setReviewError(null);
+    try {
+      setReview(await startReviewSession());
+      setReviewInput("");
+    } catch {
+      setReviewError("Couldn't start a review.");
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
+  async function submitReview(event: FormEvent) {
+    event.preventDefault();
+    if (!review || review.complete || reviewBusy || mic.sending) return;
+    setReviewBusy(true);
+    setReviewError(null);
+    try {
+      setReview(await answerReview(review.review_id, { text: reviewInput }));
+      setReviewInput("");
+    } catch {
+      setReviewError("Couldn't score that.");
+    } finally {
+      setReviewBusy(false);
     }
   }
 
@@ -392,8 +455,34 @@ export default function App() {
           </label>
         </header>
         {catalogError ? <p className="loading">{catalogError}</p> : null}
-        {catalog ? (
-          <TownView scenarios={catalog} mapUrl={mapUrl} onOpen={(id) => openScene(id)} />
+        {review ? (
+          <ReviewPanel
+            session={review}
+            input={reviewInput}
+            busy={reviewBusy}
+            error={reviewError || mic.error}
+            hearing={hearing}
+            recording={mic.recording}
+            onInput={setReviewInput}
+            onSubmit={(event) => void submitReview(event)}
+            onHoldStart={mic.holdStart}
+            onHoldEnd={mic.holdEnd}
+            onHear={(text) => void onHear(text)}
+            onClose={() => {
+              setReview(null);
+              setReviewError(null);
+            }}
+          />
+        ) : catalog ? (
+          <>
+            <div className="town-actions">
+              <button type="button" disabled={reviewBusy} onClick={() => void startReview()}>
+                {reviewBusy ? "…" : "Review (2 min)"}
+              </button>
+              {reviewError ? <p className="hint-error">{reviewError}</p> : null}
+            </div>
+            <TownView scenarios={catalog} mapUrl={mapUrl} onOpen={(id) => openScene(id)} />
+          </>
         ) : catalogError ? null : (
           <div className="loading">Loading town…</div>
         )}
@@ -462,6 +551,7 @@ export default function App() {
             title={session.title_en || "Today's visit"}
             goals={checklist}
             phrases={session.key_phrases}
+            reviewsLine={session.reviews_line}
             hearing={hearing}
             onHear={(text) => void onHear(text)}
             onStart={() => void startWarmup()}
@@ -471,7 +561,7 @@ export default function App() {
           <WarmupScreen
             phrase={warmupPhrase}
             index={warmupIndex}
-            total={session.key_phrases.length}
+            total={warmupTotal || session.key_phrases.length}
             hearing={hearing}
             onHear={(text) => void onHear(text)}
           />

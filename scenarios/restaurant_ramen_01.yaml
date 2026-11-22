@@ -139,4 +139,4 @@ success:
     3: "no hints above level default"
     2: "one rung climbed"
     1: "completed"
-srs_tags: [restaurant, counters, polite_requests]
+srs_tags: [restaurant, counters, polite_requests, ordering]

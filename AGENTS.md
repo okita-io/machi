@@ -184,7 +184,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M2-04 | [x] | F0 / pitch-accent advisory (librosa pyin) | M2-01 | No fail on accent alone |
 | M2-05 | [x] | Correction cards in SQLite + debrief “best two” | M1-08, M2-01 | Phrases from tutor `correction` persisted |
 | M2-06 | [x] | **FSRS** scheduling in SQLite | M2-05 | Due cards query; `srs_tags` from scenarios honored |
-| M2-07 | [ ] | 2-minute spoken review mode (Sora mini-situation) | M2-06, M0-10 | End-to-end review session API |
+| M2-07 | [x] | 2-minute spoken review mode (Sora mini-situation) | M2-06, M0-10 | End-to-end review session API |
 
 ---
 
@@ -200,7 +200,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M3-04 | [x] | YAML: coin laundry (signage goals) | S0-02 | Tappable hotspots from `scene.hotspots` |
 | M3-05 | [x] | YAML: taxi | S0-02 | Win: arrive + pay |
 | M3-06 | [x] | YAML: train ticket | S0-02 | Win: ticket + platform |
-| M3-07 | [ ] | Cross-scenario SRS weaving (failed phrase resurfaces) | M2-06, M3-02+ | Integration test with tagged cards |
+| M3-07 | [x] | Cross-scenario SRS weaving (failed phrase resurfaces) | M2-06, M3-02+ | Integration test with tagged cards |
 
 ---
 
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M2-05 (weighted correction cards), M2-06 (FSRS-4.5), M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._
+_Last updated with M2-07 (spoken review sessions), M3-07 (cross-scenario SRS weaving), M4-02 (voice map and Sora expressions), M4-03 (phone layout), and INFRA-01 (speech placement). Scaffold baseline remains PR #1._

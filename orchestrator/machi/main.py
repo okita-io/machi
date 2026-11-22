@@ -29,6 +29,12 @@ from machi.session import (
     evaluate_turn,
     new_session,
 )
+from machi.turn_taking import (
+    TurnDecision,
+    UtteranceGate,
+    build_turn_gate,
+    hands_free_turn_taking,
+)
 from machi.ws_audio import PCM_FRAME_BYTES, SessionAudioBuffer
 
 logger = logging.getLogger(__name__)
@@ -228,7 +234,13 @@ def _ws_bool(value: object) -> bool:
     return value is True
 
 
-async def _ws_pcm_frame(websocket: WebSocket, buf: SessionAudioBuffer, payload: bytes) -> None:
+async def _ws_pcm_frame(
+    websocket: WebSocket,
+    session_id: str,
+    buf: SessionAudioBuffer,
+    gate: UtteranceGate | None,
+    payload: bytes,
+) -> None:
     if len(payload) != PCM_FRAME_BYTES:
         await websocket.send_json(
             {
@@ -250,6 +262,20 @@ async def _ws_pcm_frame(websocket: WebSocket, buf: SessionAudioBuffer, payload: 
             "bytes": PCM_FRAME_BYTES,
         }
     )
+    # Push-to-talk never reaches the VAD or the turn scorer.
+    if not accepted or not hands_free_turn_taking(buf.hands_free, gate):
+        return
+    try:
+        decision = gate.observe(payload, bytes(buf.pcm))
+    except Exception:
+        logger.exception("hands-free VAD failed session=%s", session_id)
+        return
+    if decision is not TurnDecision.CUT:
+        return
+    logger.info("hands-free endpoint session=%s", session_id)
+    await _ws_turn(websocket, session_id, buf, {})
+    gate.reset()
+    buf.start(hands_free=True)
 
 
 async def _ws_turn(
@@ -291,6 +317,7 @@ async def _ws_control(
     websocket: WebSocket,
     session_id: str,
     buf: SessionAudioBuffer,
+    gate: UtteranceGate | None,
     raw: str,
 ) -> None:
     try:
@@ -304,6 +331,8 @@ async def _ws_control(
     kind = data.get("type")
     if kind == "audio_start":
         buf.start(hands_free=_ws_bool(data.get("hands_free")))
+        if hands_free_turn_taking(buf.hands_free, gate):
+            gate.reset()
         await websocket.send_json(
             {
                 "type": "audio_ack",
@@ -332,12 +361,20 @@ async def _ws_control(
 
 @app.websocket("/ws/{session_id}")
 async def ws_session(websocket: WebSocket, session_id: str) -> None:
-    """JSON control events plus 640-byte PCM frames. Replies are JSON only."""
+    """JSON control plus 640-byte PCM frames. Replies are JSON only.
+
+    Push-to-talk (``hands_free`` false or omitted) only stores PCM until the
+    client sends ``turn``. That path does not call Silero VAD or the turn
+    scorer. Hands-free runs VAD on each accepted frame and, after the scorer
+    cuts (or the 500 ms silence ceiling), emits ``turn_result`` the same way
+    a client ``turn`` event does.
+    """
     await websocket.accept()
     if session_id not in SESSIONS:
         await websocket.close(code=4404)
         return
     buf = SessionAudioBuffer()
+    gate = build_turn_gate()
     try:
         while True:
             message = await websocket.receive()
@@ -346,8 +383,8 @@ async def ws_session(websocket: WebSocket, session_id: str) -> None:
             payload = message.get("bytes")
             raw = message.get("text")
             if payload is not None:
-                await _ws_pcm_frame(websocket, buf, payload)
+                await _ws_pcm_frame(websocket, session_id, buf, gate, payload)
             elif raw is not None:
-                await _ws_control(websocket, session_id, buf, raw)
+                await _ws_control(websocket, session_id, buf, gate, raw)
     except (WebSocketDisconnect, WebSocketDisconnected):
         return

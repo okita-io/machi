@@ -10,7 +10,9 @@ type ServerEvent =
 
 /**
  * Push-to-talk mic over the session WebSocket.
- * `handsFree` is forwarded on `audio_start` only; VAD (M0-04) will use it to end turns.
+ * Push-to-talk (`handsFree` false) ends on release (`audio_stop` + `turn`).
+ * The server does not run VAD on that path. Hands-free may emit `turn_result`
+ * after trailing silence; release still sends `turn`.
  */
 export function useMic(
   sessionId: string | null,

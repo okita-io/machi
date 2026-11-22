@@ -74,6 +74,29 @@ cd web && npm install && npm run dev
 
 The dev UI logs each captured PCM frame in the browser console. Set `VITE_LOG_PCM_FRAMES=0` to turn that off. Production builds do not log frames. The mic works on localhost or HTTPS.
 
+### Hands-free turn taking
+
+Push-to-talk (`hands_free: false`) never runs VAD or a turn scorer. Release the button; the client sends `turn`.
+
+Hands-free (`hands_free: true` on `audio_start`) runs **Silero VAD** (MIT, ONNX, CPU) on each 20 ms frame. After the learner has spoken, about 250 ms of silence is a candidate end-of-turn. The default scorer is a silence-duration heuristic: it holds through pauses shorter than **500 ms** and cuts at that ceiling, which is the spec budget. No model download is required for the heuristic. The server then emits `turn_result` on its own. Fetch Silero once if you want that path live:
+
+```bash
+python tools/fetch_vad_model.py
+pip install -e "./orchestrator[vad]"
+```
+
+The ONNX file is written to `.cache/vad/silero_vad.onnx` and is gitignored. Without that file, hands-free stays on the client `turn` path.
+
+**Smart Turn v3** is optional and off by default. The weights are [pipecat-ai/smart-turn-v3](https://huggingface.co/pipecat-ai/smart-turn-v3) (BSD-2-Clause). They are not in the default Docker image. The adapter loads `torch` and `transformers` lazily, on CPU, only when `SMART_TURN_ENABLED=1`, and only after VAD raises a candidate. Install the extra yourself:
+
+```bash
+pip install -e "./orchestrator[smart-turn]"
+# SMART_TURN_ENABLED=1
+# SMART_TURN_MODEL=pipecat-ai/smart-turn-v3
+```
+
+Push-to-talk bypasses Smart Turn as well. A hold from the model still cannot outlast the 500 ms silence ceiling.
+
 ## Repository layout
 
 ```
@@ -96,9 +119,9 @@ docker-compose.yml
 | SQLite session logging | Real (minimal) |
 | Romaji (cutlet) | Real |
 | Furigana | From scenario kana in demo; fugashi/pyopenjtalk in M1 |
-| Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks. VAD not yet |
+| Mic / WebSocket audio | Push-to-talk sends 20 ms 16 kHz PCM; server acks and waits for `turn` |
 | Turn pipeline | Audio-only `audio_b64` (REST or WebSocket) runs ASR → LLM → TTS. Typed text skips ASR |
-| Hands-free checkbox | Flag on `audio_start` only (no auto end-of-turn) |
+| Hands-free | Silero VAD + silence heuristic (500 ms ceiling). Smart Turn v3 optional |
 | ASR / TTS (CPU) | Mock / stub WAV |
 | ASR / TTS / pron (GPU) | Health stubs |
 | LLM | Live when `LLM_BASE_URL` set; else mock |
@@ -106,7 +129,7 @@ docker-compose.yml
 
 ## Suggested next steps
 
-1. **M0** — Silero VAD on the PCM frames already sent over the session WebSocket.
+1. **M0** — Stream a real ASR (`asr/`) on the PCM the VAD already commits.
 2. **GPU ASR/TTS** — Implement `asr` and `tts` services with Qwen3 or Kokoro on the `cpu`/`spark` profiles.
 3. **M1** — Hint ladder UI, coach drawer, debrief screen, fugashi + unidic-lite furigana for any line.
 4. **Assets** — ComfyUI bake script for WebP backgrounds and Sora expression sheet.

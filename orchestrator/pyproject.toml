@@ -15,6 +15,16 @@ dependencies = [
 
 [project.optional-dependencies]
 nlp = ["cutlet>=0.4.0"]
+# Silero VAD ONNX. Not required for typed turns or push-to-talk.
+vad = ["numpy>=1.26", "onnxruntime>=1.20"]
+# Smart Turn v3 (BSD-2-Clause). Off unless SMART_TURN_ENABLED=1. Not in the CPU image.
+smart-turn = [
+  "numpy>=1.26",
+  "onnxruntime>=1.20",
+  "torch>=2.2",
+  "transformers>=4.46",
+  "huggingface-hub>=0.26",
+]
 
 dev = [
   "pytest>=8.3.0",

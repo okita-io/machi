@@ -109,6 +109,18 @@ Push-to-talk (`hands_free` false) does not run VAD or the turn scorer. The clien
 
 Each turn logs one JSON line (`event: turn_latency`) with `stages_ms` for ASR, LLM, and TTS and a `cancelled` flag. HTTP `POST /sessions/{id}/turn` also sets `X-Latency-ASR`, `X-Latency-LLM`, and `X-Latency-TTS` (milliseconds). A stage that did not run — typed text skips ASR — is `null` in the log and its header is omitted. `cancelled` is false when the turn finishes. It is true when barge-in aborts the turn; stages that had already started still report elapsed time.
 
+### Latency budget
+
+Time is from the learner stopping to the first NPC audio. The M0 gate is under 2 s (`scripts/e2e_latency.py` prints p95 and asserts it only when `REAL=1`). That script clocks `POST /turn` (ASR → LLM → TTS) after push-to-talk has already ended the utterance, so the VAD + Smart Turn row is outside its measurement.
+
+| Stage | Target | Ceiling |
+| --- | --- | --- |
+| End of speech (VAD + Smart Turn) | 250 ms | 500 ms |
+| Final ASR | 150 ms | 300 ms |
+| LLM first sentence | 350 ms | 700 ms |
+| TTS first audio | 150 ms | 300 ms |
+| **Total learner stop → NPC speaks** | **~1.0 s** | **~1.9 s** |
+
 **Barge-in.** A session has one in-flight turn task. A new WebSocket `audio_start` or `turn` cancels that task (the ASR, LLM, and TTS awaits) and discards its result, so no stale `turn_result` is sent. Flow-engine updates from the cancelled turn are rolled back. The browser stops NPC playback as soon as a capture starts: push-to-talk press, or the start of a hands-free capture.
 
 ## Docker profiles

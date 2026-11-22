@@ -40,6 +40,10 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "e2e_latency: spoken-turn latency against orchestrator and speech services",
+  "accent: beginner-phrase ASR fixtures; skipped unless ASR_URL answers /health",
+]
 
 [tool.ruff]
 line-length = 100

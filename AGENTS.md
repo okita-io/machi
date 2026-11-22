@@ -146,8 +146,8 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M0-09 | [ ] | ASR phrase bias from scenario `key_phrases` / `accept` lists | M0-06, S0-02 | Context prompt passed to ASR; test shows better match on beginner phrase |
 | M0-10 | [ ] | **Qwen3-TTS 0.6B CustomVoice** streaming in `tts/` | S0-09 | First audio chunk **&lt; 300 ms** ceiling after text; Apache-2.0 |
 | M0-11 | [x] | Barge-in: cancel in-flight TTS/LLM on new speech | M0-02, M0-10 | Web stops playback; server aborts pending calls |
-| M0-12 | [ ] | E2E latency test script or pytest marker | M0-03–M0-10 | Documented command; p95 logged; target under **2 s** on reference hardware |
-| M0-13 | [ ] | Beginner accent test set (small WAV + expected text) | M0-06 | `tests/fixtures/asr/` checked in (no weights); tracks ASR regressions |
+| M0-12 | [x] | E2E latency test script or pytest marker | M0-03–M0-10 | Documented command; p95 logged; target under **2 s** on reference hardware |
+| M0-13 | [x] | Beginner accent test set (small WAV + expected text) | M0-06 | `tests/fixtures/asr/` checked in (no weights); tracks ASR regressions |
 
 ---
 
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M1-03 (hint ladder), M1-04 (coach drawer), and M1-06 (lip flap). Scaffold baseline remains PR #1._
+_Last updated with M0-12 (e2e latency), M0-13 (accent fixtures), M1-03 (hint ladder), M1-04 (coach drawer), and M1-06 (lip flap). Scaffold baseline remains PR #1._

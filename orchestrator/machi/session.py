@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from machi.nlp import match_goal
+from machi.nlp import build_ruby_html, match_goal, to_romaji
 from machi.schema import FlowNode, KeyPhrase, ScenarioSpec
 
 PHASE_BRIEFING = "briefing"
@@ -26,7 +26,7 @@ class SessionState:
     retries: int = 0
     phase: str = PHASE_BRIEFING
     warmup_index: int = 0
-    corrections: list[dict[str, str]] = field(default_factory=list)
+    corrections: list[dict[str, Any]] = field(default_factory=list)
     hint_peaks: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -209,8 +209,46 @@ def apply_warmup_attempt(state: SessionState, utterance: str) -> dict[str, Any]:
     }
 
 
-def remember_correction(state: SessionState, coach: dict[str, Any]) -> None:
-    """Keep tutor corrections. Debrief shows the latest two."""
+def climbs_above_default(level: int, rung: int) -> int:
+    """Hint rungs climbed past the level's starting rung."""
+    return max(0, int(rung) - default_rung_for_level(level))
+
+
+def correction_weight(misses: int, hint_climbs: int) -> int:
+    """Repeat misses plus hint climbs. Higher weight ranks first on the debrief."""
+    return max(0, int(misses)) + max(0, int(hint_climbs))
+
+
+def coaching_goal_id(expected: list[str], hits: list[str]) -> str:
+    """Goal this correction belongs to: the miss, otherwise the goal just hit."""
+    for goal_id in expected:
+        if goal_id not in hits:
+            return goal_id
+    if hits:
+        return hits[0]
+    return expected[0] if expected else ""
+
+
+def best_corrections(items: list[dict[str, Any]], *, limit: int = 2) -> list[dict[str, Any]]:
+    """Highest weight, then the later phrase. The two winners stay in visit order."""
+    usable = [item for item in items if _correction_label(item)]
+    ranked = sorted(
+        enumerate(usable),
+        key=lambda pair: (-int(pair[1].get("weight") or 0), -pair[0]),
+    )[:limit]
+    ranked.sort(key=lambda pair: pair[0])
+    return [item for _, item in ranked]
+
+
+def _correction_label(item: dict[str, Any]) -> str:
+    en = item.get("en")
+    ja = item.get("ja")
+    en_text = en.strip() if isinstance(en, str) else ""
+    ja_text = ja.strip() if isinstance(ja, str) else ""
+    return en_text or ja_text
+
+
+def _coach_correction_text(coach: dict[str, Any]) -> tuple[str, str]:
     en = coach.get("correction_en")
     ja = coach.get("correction_ja")
     en_text = en.strip() if isinstance(en, str) else ""
@@ -223,11 +261,66 @@ def remember_correction(state: SessionState, coach: dict[str, Any]) -> None:
                 ja_text = legacy
             else:
                 en_text = legacy
+    return en_text, ja_text
+
+
+def remember_correction(
+    state: SessionState,
+    coach: dict[str, Any],
+    *,
+    learner_text: str = "",
+    goal_id: str = "",
+    hint_climbs: int = 0,
+    romaji: str | None = None,
+    kana: str | None = None,
+) -> dict[str, Any] | None:
+    """Record a tutor or warm-up correction. A repeat miss raises its weight."""
+    en_text, ja_text = _coach_correction_text(coach)
     if not en_text and not ja_text:
-        return
-    item = {"en": en_text, "ja": ja_text}
-    if item not in state.corrections:
-        state.corrections.append(item)
+        return None
+    key = ja_text or en_text
+    climbs = max(0, int(hint_climbs))
+    ruby = build_ruby_html(ja_text, kana) if ja_text else ""
+    if romaji and romaji.strip():
+        romaji_text = romaji.strip()
+    else:
+        romaji_text = to_romaji(ja_text) if ja_text else ""
+    tags = list(state.scenario.srs_tags)
+    for item in state.corrections:
+        if item.get("key") != key:
+            continue
+        misses = int(item.get("misses") or 1) + 1
+        climbs = max(int(item.get("hint_climbs") or 0), climbs)
+        item["misses"] = misses
+        item["hint_climbs"] = climbs
+        item["weight"] = correction_weight(misses, climbs)
+        item["learner_text"] = learner_text
+        if ja_text:
+            item["ja"] = ja_text
+            item["kana_ruby"] = ruby
+        if en_text:
+            item["en"] = en_text
+        if romaji_text:
+            item["romaji"] = romaji_text
+        if goal_id:
+            item["goal_id"] = goal_id
+        item["srs_tags"] = tags
+        return item
+    item = {
+        "key": key,
+        "en": en_text,
+        "ja": ja_text,
+        "goal_id": goal_id,
+        "learner_text": learner_text,
+        "kana_ruby": ruby,
+        "romaji": romaji_text,
+        "srs_tags": tags,
+        "misses": 1,
+        "hint_climbs": climbs,
+        "weight": correction_weight(1, climbs),
+    }
+    state.corrections.append(item)
+    return item
 
 
 def scripted_npc_line(

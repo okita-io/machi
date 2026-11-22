@@ -1,11 +1,17 @@
 """SQLite progress store.
 
-Schema v3 is applied by ``init_db``. Databases created before versioning (v1
-sessions + attempts only) are altered in place, then v2 hint columns and the
-v3 ``pitch_advisory`` JSON column are added. Debrief writes session stars,
-completion, and the max hint rung, plus one ``hint:{goal_id}`` attempt row per
-goal so per-goal peaks survive in the attempt columns. Pitch advice is stored
-on the spoken attempt and never changes stars.
+Schema v4 is applied by ``init_db``. Databases created before versioning (v1
+sessions + attempts only) are altered in place, then v2 hint columns, the v3
+``pitch_advisory`` JSON column, and the v4 ``corrections`` / ``cards`` tables
+are added. Debrief writes session stars, completion, and the max hint rung,
+plus one ``hint:{goal_id}`` attempt row per goal so per-goal peaks survive in
+the attempt columns. Pitch advice is stored on the spoken attempt and never
+changes stars.
+
+A correction row is one phrase the tutor (or a missed warm-up line) asked the
+learner to try. Weight is repeat misses plus hint climbs. Completing a visit
+inserts one FSRS card per correction; ``srs_tags`` from the scenario are copied
+onto that card. Cards start ``new`` and due immediately.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Historical v1 DDL. Kept so migrations and tests share one literal.
 V1_SCHEMA_SQL = """
@@ -329,6 +335,7 @@ def _create_current_tables(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    _create_review_tables(conn)
 
 
 def _migrate_to_current(conn: sqlite3.Connection, version: int | None) -> None:
@@ -336,6 +343,8 @@ def _migrate_to_current(conn: sqlite3.Connection, version: int | None) -> None:
         _migrate_v1_to_v2(conn)
     if version is None or version < 3:
         _add_column(conn, "attempts", "pitch_advisory", "TEXT")
+    if version is None or version < 4:
+        _create_review_tables(conn)
 
 
 def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
@@ -343,6 +352,281 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         _add_column(conn, "sessions", name, decl)
     for name, decl in _ATTEMPT_COLUMNS_V2:
         _add_column(conn, "attempts", name, decl)
+
+
+def _create_review_tables(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS corrections (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id TEXT NOT NULL,
+          scenario_id TEXT NOT NULL,
+          goal_id TEXT,
+          learner_text TEXT,
+          correction_ja TEXT,
+          correction_en TEXT,
+          kana_ruby TEXT,
+          romaji TEXT,
+          srs_tags TEXT,
+          weight INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_corrections_session
+          ON corrections (session_id);
+        CREATE TABLE IF NOT EXISTS cards (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          correction_id INTEGER NOT NULL UNIQUE,
+          state TEXT NOT NULL DEFAULT 'new'
+            CHECK (state IN ('new', 'learning', 'review')),
+          due_at TEXT,
+          stability REAL,
+          difficulty REAL,
+          reps INTEGER NOT NULL DEFAULT 0,
+          lapses INTEGER NOT NULL DEFAULT 0,
+          last_rating TEXT,
+          last_review_at TEXT,
+          srs_tags TEXT,
+          created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_cards_due ON cards (due_at);
+        """
+    )
+
+
+def record_correction(
+    path: Path,
+    *,
+    session_id: str,
+    scenario_id: str,
+    goal_id: str,
+    learner_text: str,
+    correction_ja: str,
+    correction_en: str,
+    kana_ruby: str,
+    romaji: str,
+    srs_tags: list[str],
+    weight: int,
+) -> int:
+    """Insert a phrase, or refresh it when the same Japanese line is missed again."""
+    tags = ",".join(part for part in srs_tags if part)
+    conn = sqlite3.connect(path)
+    try:
+        if correction_ja:
+            row = conn.execute(
+                """
+                SELECT id FROM corrections
+                WHERE session_id = ? AND correction_ja = ?
+                """,
+                (session_id, correction_ja),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT id FROM corrections
+                WHERE session_id = ? AND correction_ja = '' AND correction_en = ?
+                """,
+                (session_id, correction_en),
+            ).fetchone()
+        if row is None:
+            cur = conn.execute(
+                """
+                INSERT INTO corrections (
+                  session_id, scenario_id, goal_id, learner_text,
+                  correction_ja, correction_en, kana_ruby, romaji, srs_tags, weight
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    scenario_id,
+                    goal_id,
+                    learner_text,
+                    correction_ja,
+                    correction_en,
+                    kana_ruby,
+                    romaji,
+                    tags,
+                    int(weight),
+                ),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        conn.execute(
+            """
+            UPDATE corrections
+            SET scenario_id = ?, goal_id = ?, learner_text = ?,
+                correction_en = ?, kana_ruby = ?, romaji = ?, srs_tags = ?, weight = ?
+            WHERE id = ?
+            """,
+            (
+                scenario_id,
+                goal_id,
+                learner_text,
+                correction_en,
+                kana_ruby,
+                romaji,
+                tags,
+                int(weight),
+                int(row[0]),
+            ),
+        )
+        conn.commit()
+        return int(row[0])
+    finally:
+        conn.close()
+
+
+def enroll_corrections(path: Path, session_id: str, *, due_at: str) -> int:
+    """Add one new card per correction that does not have one yet."""
+    conn = _connect(path)
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, srs_tags FROM corrections
+            WHERE session_id = ?
+            ORDER BY id
+            """,
+            (session_id,),
+        ).fetchall()
+        added = 0
+        for row in rows:
+            cur = conn.execute(
+                """
+                INSERT INTO cards (
+                  correction_id, state, due_at, reps, lapses, srs_tags
+                ) VALUES (?, 'new', ?, 0, 0, ?)
+                ON CONFLICT(correction_id) DO NOTHING
+                """,
+                (row["id"], due_at, row["srs_tags"]),
+            )
+            added += cur.rowcount
+        conn.commit()
+        return added
+    finally:
+        conn.close()
+
+
+def next_due_cards(path: Path, *, now: str, limit: int) -> list[dict]:
+    """Due cards soonest first. A null due time is due now."""
+    conn = _connect(path)
+    try:
+        rows = conn.execute(
+            f"""
+            {_CARD_SELECT}
+            WHERE cards.due_at IS NULL OR cards.due_at <= ?
+            ORDER BY cards.due_at ASC, cards.id ASC
+            LIMIT ?
+            """,
+            (now, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_review_card_payload(row) for row in rows]
+
+
+def get_review_card(path: Path, card_id: int) -> dict | None:
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            f"{_CARD_SELECT} WHERE cards.id = ?",
+            (card_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return _review_card_payload(row)
+
+
+def save_card_review(
+    path: Path,
+    card_id: int,
+    *,
+    state: str,
+    due_at: str,
+    stability: float,
+    difficulty: float,
+    reps: int,
+    lapses: int,
+    last_rating: str,
+    last_review_at: str,
+) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            UPDATE cards
+            SET state = ?, due_at = ?, stability = ?, difficulty = ?,
+                reps = ?, lapses = ?, last_rating = ?, last_review_at = ?
+            WHERE id = ?
+            """,
+            (
+                state,
+                due_at,
+                stability,
+                difficulty,
+                reps,
+                lapses,
+                last_rating,
+                last_review_at,
+                card_id,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+_CARD_SELECT = """
+SELECT
+  cards.id AS card_id,
+  cards.correction_id AS correction_id,
+  cards.state AS state,
+  cards.due_at AS due_at,
+  cards.stability AS stability,
+  cards.difficulty AS difficulty,
+  cards.reps AS reps,
+  cards.lapses AS lapses,
+  cards.last_rating AS last_rating,
+  cards.last_review_at AS last_review_at,
+  cards.srs_tags AS srs_tags,
+  corrections.session_id AS session_id,
+  corrections.scenario_id AS scenario_id,
+  corrections.goal_id AS goal_id,
+  corrections.learner_text AS learner_text,
+  corrections.correction_ja AS correction_ja,
+  corrections.correction_en AS correction_en,
+  corrections.kana_ruby AS kana_ruby,
+  corrections.romaji AS romaji,
+  corrections.weight AS weight
+FROM cards
+JOIN corrections ON corrections.id = cards.correction_id
+"""
+
+
+def _review_card_payload(row: sqlite3.Row) -> dict:
+    raw_tags = row["srs_tags"] or ""
+    return {
+        "card_id": row["card_id"],
+        "correction_id": row["correction_id"],
+        "state": row["state"],
+        "due_at": row["due_at"],
+        "stability": row["stability"],
+        "difficulty": row["difficulty"],
+        "reps": row["reps"],
+        "lapses": row["lapses"],
+        "last_rating": row["last_rating"],
+        "last_review_at": row["last_review_at"],
+        "srs_tags": [part for part in raw_tags.split(",") if part],
+        "session_id": row["session_id"],
+        "scenario_id": row["scenario_id"],
+        "goal_id": row["goal_id"] or "",
+        "learner_text": row["learner_text"] or "",
+        "correction_ja": row["correction_ja"] or "",
+        "correction_en": row["correction_en"] or "",
+        "kana_ruby": row["kana_ruby"] or "",
+        "romaji": row["romaji"] or "",
+        "weight": row["weight"] or 0,
+    }
 
 
 def _add_column(conn: sqlite3.Connection, table: str, name: str, decl: str) -> None:

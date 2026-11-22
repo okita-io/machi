@@ -38,6 +38,7 @@ export type CorrectionCard = {
   ja: string;
   romaji: string;
   ruby_html: string;
+  weight?: number;
 };
 
 export type ScenarioSummary = {
@@ -137,6 +138,13 @@ export async function synthesizeSpeech(text: string, voice = "guide"): Promise<s
   const body = (await r.json()) as { audio_b64?: string };
   if (!body.audio_b64) throw new Error("tts_empty");
   return body.audio_b64;
+}
+
+/** Idempotent. Completing a visit already enrolls the same corrections. */
+export async function enrollReviews(sessionId: string): Promise<{ added: number }> {
+  const r = await fetch(`${API_BASE}/sessions/${sessionId}/reviews`, { method: "POST" });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
 }
 
 export async function fetchCoach(

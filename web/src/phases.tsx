@@ -82,13 +82,17 @@ export function DebriefScreen({
   goals,
   corrections,
   pitchAdvisory,
+  reviewsNote,
+  onAddReviews,
   onReplay,
   onBriefing,
 }: {
   stars: number;
   goals: GoalStatus[];
-  corrections: (CorrectionLike & { romaji?: string; ruby_html?: string })[];
+  corrections: (CorrectionLike & { romaji?: string; ruby_html?: string; weight?: number })[];
   pitchAdvisory?: PitchAdvisory | null;
+  reviewsNote?: string | null;
+  onAddReviews: () => void;
   onReplay: () => void;
   onBriefing: () => void;
 }) {
@@ -130,6 +134,9 @@ export function DebriefScreen({
         ))}
       </div>
       <div className="hint-actions">
+        <button type="button" onClick={onAddReviews} disabled={corrections.length === 0}>
+          Add corrections to review
+        </button>
         <button type="button" onClick={onReplay}>
           Replay scenario
         </button>
@@ -137,6 +144,7 @@ export function DebriefScreen({
           Return to briefing
         </button>
       </div>
+      {reviewsNote ? <p className="reviews-note">{reviewsNote}</p> : null}
     </section>
   );
 }

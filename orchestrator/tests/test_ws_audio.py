@@ -37,7 +37,7 @@ def test_ws_typed_turn_still_works():
         assert created.status_code == 200
         sid = created.json()["session_id"]
         with client.websocket_connect(f"/ws/{sid}") as ws:
-            ws.send_json({"type": "turn", "text": "ふたりです"})
+            ws.send_json({"type": "turn", "text": "ふたりです", "skip_warmup": True})
             result = ws.receive_json()
         assert result["type"] == "turn_result"
         assert result["goal_hits"] == ["party_size"]
@@ -108,13 +108,13 @@ def test_ws_pcm_frames_acked_and_start_stop():
             assert stopped["frames"] == 2
             assert stopped["bytes"] == 1280
 
-            ws.send_json({"type": "turn"})
+            ws.send_json({"type": "turn", "skip_warmup": True})
             result = ws.receive_json()
             assert result["type"] == "turn_result"
             assert result["learner_text"] == "ふたりです"
             assert result["goal_hits"] == ["party_size"]
 
-            ws.send_json({"type": "turn"})
+            ws.send_json({"type": "turn", "skip_warmup": True})
             drained = ws.receive_json()
             assert drained["type"] == "turn_result"
 

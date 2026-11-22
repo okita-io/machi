@@ -8,8 +8,9 @@ import binascii
 import json
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,17 +21,30 @@ from machi.clients import SpeechError, synthesize, transcribe
 from machi.config import settings
 from machi.db import init_db, record_attempt, record_session
 from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
-from machi.llm import LlmClient
+from machi.llm import LlmClient, render_prompt
 from machi.nlp import build_ruby_html, to_romaji
 from machi.scenario_loader import load_all_scenarios
 from machi.session import (
+    PHASE_BRIEFING,
+    PHASE_DEBRIEF,
+    PHASE_ROLEPLAY,
+    PHASE_WARMUP,
     SessionState,
     advance_node,
+    apply_warmup_attempt,
+    begin_warmup,
     default_tutor_payload,
     evaluate_turn,
     expected_goals,
+    goals_completed,
     new_session,
     normalize_tutor_payload,
+    note_hint_peaks,
+    remember_correction,
+    reset_flow,
+    scenario_complete,
+    scripted_npc_line,
+    stars_earned,
 )
 from machi.turn_taking import (
     TurnDecision,
@@ -109,6 +123,8 @@ class TurnRequest(BaseModel):
     text: str | None = None
     audio_b64: str | None = None
     hint_max: dict[str, int] = Field(default_factory=dict)
+    skip_warmup: bool = False
+    advance: Literal["warmup", "briefing", "replay"] | None = None
 
 
 class SynthesizeRequest(BaseModel):
@@ -161,7 +177,11 @@ async def create_session(body: CreateSessionRequest) -> dict[str, Any]:
             "guide_sprite": f"{settings.assets_base_url}/sprites/sora_neutral.svg",
         },
         "opening_npc": enrich_line(npc_ja, npc_kana),
+        "phase": state.phase,
+        "title_en": spec.title.en,
+        "title_ja": spec.title.ja,
         "briefing_en": spec.goals[0].prompt_en if spec.goals else "",
+        "required_goals": list(spec.success.required),
         "key_phrases": [kp.model_dump() for kp in spec.key_phrases],
         "goals": [
             {
@@ -222,7 +242,7 @@ async def session_turn(
     timer = TurnLatency()
     snapshot = _snapshot_flow(state)
     try:
-        result = await _session_turn_pipeline(state, body, timer)
+        result = await _dispatch_turn(state, body, timer)
     except asyncio.CancelledError:
         # Barge-in: drop flow mutations so the learner can say the line again.
         _restore_flow(state, snapshot)
@@ -232,21 +252,139 @@ async def session_turn(
     for key, value in timer.header_map().items():
         response.headers[key] = value
     timer.emit(session_id=session_id, cancelled=False)
-    record_attempt(
-        Path(settings.db_path),
-        session_id,
-        state.node_id,
-        result["learner_text"],
-        result["goal_hits"],
-    )
+    if result.get("learner_text"):
+        record_attempt(
+            Path(settings.db_path),
+            session_id,
+            state.node_id,
+            result["learner_text"],
+            result["goal_hits"],
+        )
     return result
 
 
-async def _session_turn_pipeline(
+async def _dispatch_turn(
     state: SessionState,
     body: TurnRequest,
     timer: TurnLatency,
 ) -> dict[str, Any]:
+    """Briefing and warm-up are server-gated. skip_warmup jumps to role-play."""
+    if body.advance == "replay":
+        reset_flow(state, phase=PHASE_ROLEPLAY)
+        return _control_payload(state, kind="turn", reset=True)
+    if body.advance == "briefing":
+        reset_flow(state, phase=PHASE_BRIEFING)
+        return _control_payload(state, kind="briefing", reset=True)
+    if body.skip_warmup and state.phase in (PHASE_BRIEFING, PHASE_WARMUP):
+        state.phase = PHASE_ROLEPLAY
+    elif body.advance == "warmup" and state.phase == PHASE_BRIEFING:
+        begin_warmup(state)
+        return _warmup_status(state, utterance="", passed=None)
+    if state.phase == PHASE_BRIEFING:
+        raise HTTPException(status_code=409, detail="warmup_incomplete")
+    if state.phase == PHASE_WARMUP:
+        return await _warmup_pipeline(state, body, timer)
+    if state.phase == PHASE_DEBRIEF:
+        raise HTTPException(status_code=409, detail="scenario_complete")
+    return await _session_turn_pipeline(state, body, timer)
+
+
+def _control_payload(state: SessionState, *, kind: str, reset: bool) -> dict[str, Any]:
+    node = state.scenario.flow.nodes[state.node_id]
+    npc_ja, npc_kana = node.npc or "", node.npc_kana
+    return _pack_turn(
+        state,
+        kind=kind,
+        utterance="",
+        goal_hits=[],
+        accepted=False,
+        npc_ja=npc_ja,
+        npc_kana=npc_kana,
+        scripted_ja=npc_ja,
+        coach=default_tutor_payload([], coach_note="", hint_rung=state.hint_rung),
+        coach_pending=False,
+        audio=b"",
+        hint_max={},
+        reset=reset,
+    )
+
+
+def _warmup_status(
+    state: SessionState,
+    *,
+    utterance: str,
+    passed: bool | None,
+    attempt: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    phrases = state.scenario.key_phrases
+    if attempt is not None:
+        phrase = attempt.get("phrase")
+        next_phrase = attempt.get("next_phrase")
+        complete = bool(attempt.get("complete"))
+    else:
+        phrase = phrases[0] if phrases and state.phase == PHASE_WARMUP else None
+        next_phrase = phrase
+        complete = state.phase == PHASE_ROLEPLAY
+    if complete and state.phase == PHASE_ROLEPLAY:
+        node = state.scenario.flow.nodes[state.node_id]
+        npc_ja, npc_kana = node.npc or "", node.npc_kana
+    elif next_phrase is not None:
+        npc_ja, npc_kana = next_phrase.ja, next_phrase.kana
+    elif phrase is not None:
+        npc_ja, npc_kana = phrase.ja, phrase.kana
+    else:
+        npc_ja, npc_kana = "", None
+    note = ""
+    if phrase is not None and passed is not None:
+        template = "coach_note_warmup_pass.md" if passed else "coach_note_warmup_miss.md"
+        note = render_prompt(template, {"phrase_en": phrase.en})
+    payload = _pack_turn(
+        state,
+        kind="warmup",
+        utterance=utterance,
+        goal_hits=[],
+        accepted=False,
+        npc_ja=npc_ja,
+        npc_kana=npc_kana,
+        scripted_ja=npc_ja,
+        coach=default_tutor_payload([], coach_note=note, hint_rung=state.hint_rung),
+        coach_pending=False,
+        audio=b"",
+        hint_max={},
+        reset=False,
+    )
+    payload.update(
+        {
+            "warmup_index": state.warmup_index,
+            "warmup_total": len(phrases),
+            "warmup_passed": passed,
+            "warmup_complete": complete,
+            "phrase": phrase.model_dump() if phrase is not None else None,
+            "next_phrase": next_phrase.model_dump() if next_phrase is not None else None,
+        }
+    )
+    return payload
+
+
+async def _warmup_pipeline(
+    state: SessionState,
+    body: TurnRequest,
+    timer: TurnLatency,
+) -> dict[str, Any]:
+    """One lenient attempt per key phrase. Goals are not scored."""
+    utterance = await _hear_utterance(body, timer)
+    timer.skip(STAGE_LLM)
+    timer.skip(STAGE_TTS)
+    attempt = apply_warmup_attempt(state, utterance)
+    return _warmup_status(
+        state,
+        utterance=utterance,
+        passed=bool(attempt["passed"]),
+        attempt=attempt,
+    )
+
+
+async def _hear_utterance(body: TurnRequest, timer: TurnLatency) -> str:
     # Blank text is not a typed turn, so audio_b64 alone still reaches ASR.
     utterance = (body.text or "").strip()
     try:
@@ -262,40 +400,51 @@ async def _session_turn_pipeline(
             timer.skip(STAGE_ASR)
     except SpeechError as exc:
         raise _speech_unavailable(exc) from exc
+    return utterance
+
+
+async def _session_turn_pipeline(
+    state: SessionState,
+    body: TurnRequest,
+    timer: TurnLatency,
+) -> dict[str, Any]:
+    utterance = await _hear_utterance(body, timer)
 
     prev_node_id = state.node_id
+    expected_ids = expected_goals(state.scenario.flow.nodes[prev_node_id])
     goal_hits, success = evaluate_turn(state, utterance)
-    if body.hint_max:
-        state.hint_rung = max(state.hint_rung, max(body.hint_max.values()))
+    note_hint_peaks(state, body.hint_max)
 
     if success:
         advance_node(state, goal_hits, progressed=True)
-        node = state.scenario.flow.nodes[state.node_id]
-        npc_ja, npc_kana = node.npc or "", node.npc_kana
-        if prev_node_id != state.node_id and state.node_id == "pay" and "pay" in goal_hits:
-            pay = state.scenario.flow.nodes["pay"]
-            npc_ja = pay.npc_on_success or npc_ja
-            npc_kana = pay.npc_on_success_kana
-    else:
-        node = state.scenario.flow.nodes[state.node_id]
-        if node.on_other:
-            npc_ja, npc_kana = node.on_other.clarify, None
-        else:
-            npc_ja, npc_kana = node.npc or "", node.npc_kana
+    npc_ja, npc_kana = scripted_npc_line(state, prev_node_id, success=success)
 
     scripted_ja = npc_ja
-    npc_system = f"You are {state.scenario.npc.role}. Speak only Japanese, one short line."
-    npc_user = f"Learner said: {utterance}. Respond in character."
+    npc_system = render_prompt(
+        "npc_system.md",
+        {"npc_role": state.scenario.npc.role, "register": state.scenario.npc.register},
+    )
+    npc_user = render_prompt(
+        "npc_user.md",
+        {"node_id": prev_node_id, "utterance": utterance, "scripted_line": scripted_ja},
+    )
+    note_name = "coach_note_success.md" if success else "coach_note_retry.md"
     coach_fallback = default_tutor_payload(
         goal_hits,
-        coach_note="Good try! Match a key phrase from the briefing." if not success else "Nice!",
+        coach_note=render_prompt(note_name, {}),
         hint_rung=state.hint_rung,
     )
-    tutor_system = (
-        "You are Sora the tutor. Return JSON with goal_hits, correction, "
-        "coach_note_en, hint_rung, sentiment, sora_expression."
+    tutor_system = render_prompt("tutor_system.md", {})
+    tutor_user = render_prompt(
+        "tutor_user.md",
+        {
+            "utterance": utterance,
+            "goal_hits": ", ".join(goal_hits),
+            "expected_goals": ", ".join(expected_ids),
+            "hint_rung": state.hint_rung,
+            "accepted": str(success).lower(),
+        },
     )
-    tutor_user = f"Utterance: {utterance}; hits: {goal_hits}"
     # Tutor overlaps NPC LLM and TTS. Playback must not wait on the coach note.
     coach_gen = _begin_coach(state.id)
     tutor_task = asyncio.create_task(
@@ -315,6 +464,10 @@ async def _session_turn_pipeline(
         # Let a tutor call that already finished publish before we decide.
         # A still-running tutor stays pending so this response can carry audio.
         await asyncio.sleep(0)
+        node_now = state.scenario.flow.nodes[state.node_id]
+        if node_now.debrief:
+            # The closing screen lists this turn's correction, so wait once.
+            await tutor_task
         coach, coach_pending = _take_coach(state.id, coach_gen, tutor_task, coach_fallback)
     except asyncio.CancelledError:
         _cancel_coach_task(tutor_task)
@@ -324,22 +477,24 @@ async def _session_turn_pipeline(
         raise
 
     node_now = state.scenario.flow.nodes[state.node_id]
-    return {
-        "session_id": state.id,
-        "node_id": state.node_id,
-        "learner_text": utterance,
-        "learner": enrich_line(utterance, None),
-        "goal_hits": goal_hits,
-        "accepted": success,
-        "node_expects": expected_goals(node_now),
-        "hint_max": body.hint_max,
-        # npc_kana matches the scripted line only. A live rewrite gets token ruby.
-        "npc": enrich_line(npc_ja, npc_kana if npc_ja == scripted_ja else None),
-        "coach": coach,
-        "coach_pending": coach_pending,
-        "tts_audio_b64": base64.b64encode(audio).decode("ascii"),
-        "completed_goals": sorted(state.completed_goals),
-    }
+    if node_now.debrief:
+        state.phase = PHASE_DEBRIEF
+    kind = "debrief" if node_now.debrief else "turn"
+    return _pack_turn(
+        state,
+        kind=kind,
+        utterance=utterance,
+        goal_hits=goal_hits,
+        accepted=success,
+        npc_ja=npc_ja,
+        npc_kana=npc_kana if npc_ja == scripted_ja else None,
+        scripted_ja=scripted_ja,
+        coach=coach,
+        coach_pending=coach_pending,
+        audio=audio,
+        hint_max=body.hint_max,
+        reset=False,
+    )
 
 
 async def _tutor_payload(system: str, user: str, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -383,7 +538,11 @@ def _take_coach(
             return
         if finished.exception() is not None:
             return
-        LAST_COACH[session_id] = finished.result()
+        coach = finished.result()
+        LAST_COACH[session_id] = coach
+        found = SESSIONS.get(session_id)
+        if found is not None:
+            remember_correction(found, coach)
 
     task.add_done_callback(_publish)
     if COACH_GEN.get(session_id) != gen:
@@ -396,19 +555,105 @@ def _take_coach(
         return fallback, False
     coach = task.result()
     LAST_COACH[session_id] = coach
+    found = SESSIONS.get(session_id)
+    if found is not None:
+        remember_correction(found, coach)
     return coach, False
 
 
-def _snapshot_flow(state: SessionState) -> tuple[str, set[str], int, int]:
-    return (state.node_id, set(state.completed_goals), state.hint_rung, state.retries)
+@dataclass
+class _FlowSnap:
+    node_id: str
+    completed_goals: set[str]
+    hint_rung: int
+    retries: int
+    phase: str
+    warmup_index: int
+    corrections: list[dict[str, str]]
+    hint_peaks: dict[str, int]
 
 
-def _restore_flow(state: SessionState, snap: tuple[str, set[str], int, int]) -> None:
-    node_id, goals, hint_rung, retries = snap
-    state.node_id = node_id
-    state.completed_goals = set(goals)
-    state.hint_rung = hint_rung
-    state.retries = retries
+def _snapshot_flow(state: SessionState) -> _FlowSnap:
+    return _FlowSnap(
+        node_id=state.node_id,
+        completed_goals=set(state.completed_goals),
+        hint_rung=state.hint_rung,
+        retries=state.retries,
+        phase=state.phase,
+        warmup_index=state.warmup_index,
+        corrections=[dict(item) for item in state.corrections],
+        hint_peaks=dict(state.hint_peaks),
+    )
+
+
+def _restore_flow(state: SessionState, snap: _FlowSnap) -> None:
+    state.node_id = snap.node_id
+    state.completed_goals = set(snap.completed_goals)
+    state.hint_rung = snap.hint_rung
+    state.retries = snap.retries
+    state.phase = snap.phase
+    state.warmup_index = snap.warmup_index
+    state.corrections = [dict(item) for item in snap.corrections]
+    state.hint_peaks = dict(snap.hint_peaks)
+
+
+def _pack_turn(
+    state: SessionState,
+    *,
+    kind: str,
+    utterance: str,
+    goal_hits: list[str],
+    accepted: bool,
+    npc_ja: str,
+    npc_kana: str | None,
+    scripted_ja: str,
+    coach: dict[str, Any],
+    coach_pending: bool,
+    audio: bytes,
+    hint_max: dict[str, int],
+    reset: bool,
+) -> dict[str, Any]:
+    node_now = state.scenario.flow.nodes[state.node_id]
+    payload: dict[str, Any] = {
+        "type": kind,
+        "phase": state.phase,
+        "session_id": state.id,
+        "node_id": state.node_id,
+        "learner_text": utterance,
+        "learner": enrich_line(utterance, None),
+        "goal_hits": goal_hits,
+        "accepted": accepted,
+        "node_expects": expected_goals(node_now),
+        "hint_max": hint_max,
+        # npc_kana matches the scripted line only. A live rewrite gets token ruby.
+        "npc": enrich_line(npc_ja, npc_kana if npc_ja == scripted_ja else None),
+        "coach": coach,
+        "coach_pending": coach_pending,
+        "tts_audio_b64": base64.b64encode(audio).decode("ascii") if audio else "",
+        "completed_goals": sorted(state.completed_goals),
+        "reset": reset,
+    }
+    if kind == "debrief":
+        payload["stars"] = stars_earned(state.level, state.hint_peaks)
+        payload["goals_completed"] = goals_completed(state)
+        payload["corrections"] = _correction_cards(state)
+        payload["complete"] = scenario_complete(state)
+    return payload
+
+
+def _correction_cards(state: SessionState) -> list[dict[str, str]]:
+    cards: list[dict[str, str]] = []
+    for item in state.corrections[-2:]:
+        ja = item.get("ja") or ""
+        cards.append(
+            {
+                "en": item.get("en") or "",
+                "ja": ja,
+                "romaji": to_romaji(ja) if ja else "",
+                "ruby_html": build_ruby_html(ja, None) if ja else "",
+            }
+        )
+    return cards
 
 
 def _decode_audio_b64(audio_b64: str) -> bytes:
@@ -464,12 +709,24 @@ async def _schedule_ws_turn(
     text: str | None,
     audio_b64: str | None,
     hint_max: dict[str, int] | None = None,
+    *,
+    skip_warmup: bool = False,
+    advance: Literal["warmup", "briefing", "replay"] | None = None,
 ) -> None:
     await _cancel_inflight(session_id)
     slot = _in_flight(session_id)
     generation = slot.generation
     task = asyncio.create_task(
-        _deliver_ws_turn(sink, session_id, generation, text, audio_b64, hint_max or {}),
+        _deliver_ws_turn(
+            sink,
+            session_id,
+            generation,
+            text,
+            audio_b64,
+            hint_max or {},
+            skip_warmup=skip_warmup,
+            advance=advance,
+        ),
         name=f"machi-turn-{session_id}",
     )
     slot.task = task
@@ -482,11 +739,20 @@ async def _deliver_ws_turn(
     text: str | None,
     audio_b64: str | None,
     hint_max: dict[str, int] | None = None,
+    *,
+    skip_warmup: bool = False,
+    advance: Literal["warmup", "briefing", "replay"] | None = None,
 ) -> None:
     try:
         result = await session_turn(
             session_id,
-            TurnRequest(text=text, audio_b64=audio_b64, hint_max=hint_max or {}),
+            TurnRequest(
+                text=text,
+                audio_b64=audio_b64,
+                hint_max=hint_max or {},
+                skip_warmup=skip_warmup,
+                advance=advance,
+            ),
             Response(),
         )
     except asyncio.CancelledError:
@@ -502,7 +768,8 @@ async def _deliver_ws_turn(
     slot = _in_flight(session_id)
     if slot.generation != generation or slot.task is not asyncio.current_task():
         return
-    await sink.send_json({"type": "turn_result", **result})
+    kind = str(result.get("type") or "turn")
+    await sink.send_json({**result, "type": "turn_result", "turn_type": kind})
 
 
 async def _ws_pcm_frame(
@@ -560,6 +827,8 @@ async def _ws_turn(
         text = None
     audio_b64 = data.get("audio_b64") if isinstance(data.get("audio_b64"), str) else None
     hint_max = _parse_hint_max(data.get("hint_max")) or HINT_SNAPSHOT.get(session_id, {})
+    advance = _parse_advance(data.get("advance"))
+    skip_warmup = _ws_bool(data.get("skip_warmup"))
     # Typed text keeps the existing turn path. Otherwise use this socket's PCM.
     if text:
         buf.clear()
@@ -568,7 +837,25 @@ async def _ws_turn(
         buf.clear()
     else:
         audio_b64 = buf.take_b64()
-    await _schedule_ws_turn(sink, session_id, text, audio_b64, hint_max)
+    await _schedule_ws_turn(
+        sink,
+        session_id,
+        text,
+        audio_b64,
+        hint_max,
+        skip_warmup=skip_warmup,
+        advance=advance,
+    )
+
+
+def _parse_advance(raw: object) -> Literal["warmup", "briefing", "replay"] | None:
+    if raw == "warmup":
+        return "warmup"
+    if raw == "briefing":
+        return "briefing"
+    if raw == "replay":
+        return "replay"
+    return None
 
 
 def _parse_hint_max(raw: object) -> dict[str, int]:
@@ -602,6 +889,10 @@ async def _ws_control(
         hinted = _parse_hint_max(data.get("hint_max"))
         if hinted:
             HINT_SNAPSHOT[session_id] = hinted
+        if _ws_bool(data.get("skip_warmup")):
+            found = SESSIONS.get(session_id)
+            if found is not None and found.phase in (PHASE_BRIEFING, PHASE_WARMUP):
+                found.phase = PHASE_ROLEPLAY
         await _cancel_inflight(session_id)
         buf.start(hands_free=_ws_bool(data.get("hands_free")))
         if hands_free_turn_taking(buf.hands_free, gate):

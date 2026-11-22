@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from machi.nlp import match_goal
-from machi.schema import FlowNode, ScenarioSpec
+from machi.schema import FlowNode, KeyPhrase, ScenarioSpec
+
+PHASE_BRIEFING = "briefing"
+PHASE_WARMUP = "warmup"
+PHASE_ROLEPLAY = "roleplay"
+PHASE_DEBRIEF = "debrief"
 
 
 @dataclass
@@ -19,10 +24,16 @@ class SessionState:
     completed_goals: set[str] = field(default_factory=set)
     hint_rung: int = 1
     retries: int = 0
+    phase: str = PHASE_BRIEFING
+    warmup_index: int = 0
+    corrections: list[dict[str, str]] = field(default_factory=list)
+    hint_peaks: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.node_id:
             self.node_id = self.scenario.flow.start
+        if self.hint_rung == 1:
+            self.hint_rung = default_rung_for_level(self.level)
 
 
 def expected_goals(node: FlowNode) -> list[str]:
@@ -99,6 +110,133 @@ def maybe_chain_narration(state: SessionState) -> None:
             break
 
 
+def default_rung_for_level(level: int) -> int:
+    if level <= 1:
+        return 1
+    if level >= 4:
+        return 4
+    return level
+
+
+def stars_earned(level: int, hint_max: dict[str, int]) -> int:
+    """3 at the level default, 2 after one climb, 1 after further climbs."""
+    base = default_rung_for_level(level)
+    extra = 0
+    for rung in hint_max.values():
+        extra = max(extra, max(0, int(rung) - base))
+    if extra <= 0:
+        return 3
+    if extra == 1:
+        return 2
+    return 1
+
+
+def goals_completed(state: SessionState) -> list[str]:
+    """Required goals from ``success.required``, in scenario order."""
+    return [
+        goal_id
+        for goal_id in state.scenario.success.required
+        if goal_id in state.completed_goals
+    ]
+
+
+def scenario_complete(state: SessionState) -> bool:
+    required = state.scenario.success.required
+    return bool(required) and all(goal_id in state.completed_goals for goal_id in required)
+
+
+def reset_flow(state: SessionState, *, phase: str) -> None:
+    state.phase = phase
+    state.node_id = state.scenario.flow.start
+    state.completed_goals = set()
+    state.retries = 0
+    state.warmup_index = 0
+    state.corrections = []
+    state.hint_peaks = {}
+    state.hint_rung = default_rung_for_level(state.level)
+
+
+def note_hint_peaks(state: SessionState, hint_max: dict[str, int]) -> None:
+    for key, rung in hint_max.items():
+        state.hint_peaks[key] = max(state.hint_peaks.get(key, 0), int(rung))
+    if hint_max:
+        state.hint_rung = max(state.hint_rung, max(hint_max.values()))
+
+
+def _phrase_accept(phrase: KeyPhrase) -> list[str]:
+    return [part for part in (phrase.ja, phrase.kana, phrase.romaji, phrase.en) if part]
+
+
+def begin_warmup(state: SessionState) -> KeyPhrase | None:
+    """Enter warm-up on the first key phrase. No phrases skips straight to role-play."""
+    state.warmup_index = 0
+    phrases = state.scenario.key_phrases
+    if not phrases:
+        state.phase = PHASE_ROLEPLAY
+        return None
+    state.phase = PHASE_WARMUP
+    return phrases[0]
+
+
+def apply_warmup_attempt(state: SessionState, utterance: str) -> dict[str, Any]:
+    """Score one phrase leniently and advance. A miss is not a failure."""
+    phrases = state.scenario.key_phrases
+    if not phrases or state.warmup_index >= len(phrases):
+        state.phase = PHASE_ROLEPLAY
+        return {"passed": True, "complete": True, "phrase": None, "next_phrase": None}
+    phrase = phrases[state.warmup_index]
+    passed = match_goal(utterance, _phrase_accept(phrase))
+    state.warmup_index += 1
+    complete = state.warmup_index >= len(phrases)
+    if complete:
+        state.phase = PHASE_ROLEPLAY
+    next_phrase = None if complete else phrases[state.warmup_index]
+    return {
+        "passed": passed,
+        "complete": complete,
+        "phrase": phrase,
+        "next_phrase": next_phrase,
+    }
+
+
+def remember_correction(state: SessionState, coach: dict[str, Any]) -> None:
+    """Keep tutor corrections. Debrief shows the latest two."""
+    en = coach.get("correction_en")
+    ja = coach.get("correction_ja")
+    en_text = en.strip() if isinstance(en, str) else ""
+    ja_text = ja.strip() if isinstance(ja, str) else ""
+    if not en_text and not ja_text:
+        legacy = coach.get("correction")
+        if isinstance(legacy, str) and legacy.strip():
+            legacy = legacy.strip()
+            if any(ord(ch) > 127 for ch in legacy):
+                ja_text = legacy
+            else:
+                en_text = legacy
+    if not en_text and not ja_text:
+        return
+    item = {"en": en_text, "ja": ja_text}
+    if item not in state.corrections:
+        state.corrections.append(item)
+
+
+def scripted_npc_line(
+    state: SessionState,
+    prev_node_id: str,
+    *,
+    success: bool,
+) -> tuple[str, str | None]:
+    departed = state.scenario.flow.nodes[prev_node_id]
+    current = state.scenario.flow.nodes[state.node_id]
+    if success and prev_node_id != state.node_id and departed.npc_on_success:
+        return departed.npc_on_success, departed.npc_on_success_kana
+    if not success and current.on_other:
+        return current.on_other.clarify, None
+    if current.npc:
+        return current.npc, current.npc_kana
+    return "", None
+
+
 def npc_line_for_node(state: SessionState, *, success: bool) -> tuple[str, str | None]:
     node = state.scenario.flow.nodes[state.node_id]
     if success and node.npc_on_success:
@@ -144,7 +282,7 @@ def expression_from_tutor(payload: dict[str, Any]) -> str:
         sentiment = payload.get(key)
         if isinstance(sentiment, str) and sentiment in _SENTIMENT_EXPRESSION:
             return _SENTIMENT_EXPRESSION[sentiment]
-    if payload.get("correction"):
+    if payload.get("correction") or payload.get("correction_ja") or payload.get("correction_en"):
         return "point"
     hits = payload.get("goal_hits")
     if isinstance(hits, list) and hits:
@@ -166,6 +304,8 @@ def default_tutor_payload(
         "slots": {},
         "understandable": bool(goal_hits),
         "correction": None,
+        "correction_en": None,
+        "correction_ja": None,
         "pronunciation_tip_en": None,
         "hint_rung": hint_rung,
         "step_out": False,
@@ -177,6 +317,22 @@ def default_tutor_payload(
     return payload
 
 
+def _nonempty_str(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _alias_correction(merged: dict[str, Any]) -> None:
+    """Coach UI reads ``correction``. Prefer the Japanese phrase, then English."""
+    ja = merged.get("correction_ja")
+    en = merged.get("correction_en")
+    ja_text = ja.strip() if isinstance(ja, str) else ""
+    en_text = en.strip() if isinstance(en, str) else ""
+    if ja_text:
+        merged["correction"] = ja_text
+    elif en_text and not _nonempty_str(merged.get("correction")):
+        merged["correction"] = en_text
+
+
 def normalize_tutor_payload(
     raw: dict[str, Any] | None,
     *,
@@ -186,9 +342,15 @@ def normalize_tutor_payload(
     source = raw if isinstance(raw, dict) else {}
     merged = dict(fallback)
     for key, value in source.items():
-        if value is None and key not in ("correction", "pronunciation_tip_en"):
+        if value is None and key not in (
+            "correction",
+            "correction_en",
+            "correction_ja",
+            "pronunciation_tip_en",
+        ):
             continue
         merged[key] = value
+    _alias_correction(merged)
     sentiment = merged.get("sentiment") or merged.get("coach_note_sentiment")
     if not isinstance(sentiment, str) or not sentiment:
         sentiment = "success" if merged.get("goal_hits") else "encourage"

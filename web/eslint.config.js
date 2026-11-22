@@ -33,6 +33,8 @@ export default tseslint.config(
       "src/mouth.test.ts",
       "src/coach.ts",
       "src/coach.test.ts",
+      "src/flow.ts",
+      "src/flow.test.ts",
     ],
     rules: {
       "react-refresh/only-export-components": "off",

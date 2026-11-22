@@ -202,7 +202,7 @@ def test_push_to_talk_websocket_does_not_call_vad_or_scorer():
                 ack = ws.receive_json()
                 assert ack["type"] == "audio_ack"
                 assert "turn_result" not in ack["type"]
-            ws.send_json({"type": "turn"})
+            ws.send_json({"type": "turn", "skip_warmup": True})
             result = ws.receive_json()
             assert result["type"] == "turn_result"
             assert result["learner_text"] == "ふたりです"

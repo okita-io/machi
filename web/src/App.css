@@ -297,3 +297,58 @@ header h1 {
   color: #fff;
   padding: 2rem;
 }
+
+.flow-panel {
+  position: absolute;
+  z-index: 2;
+  left: 1rem;
+  right: 1rem;
+  top: 1rem;
+  bottom: 1rem;
+  overflow: auto;
+  background: rgba(12, 14, 20, 0.9);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+}
+
+.flow-panel h2 {
+  margin: 0.2rem 0 0.6rem;
+  font-size: 1.25rem;
+}
+
+.goal-list,
+.phrase-list {
+  margin: 0.4rem 0 0.8rem;
+  padding-left: 1.1rem;
+}
+
+.phrase-list li {
+  margin-bottom: 0.7rem;
+}
+
+.phrase-list .ja,
+.correction-card .ja {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.phrase-list .romaji,
+.correction-card .romaji {
+  margin: 0.1rem 0;
+  opacity: 0.85;
+}
+
+.correction-card {
+  background: #2a2418;
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+
+.flow-panel button {
+  padding: 0.4rem 0.8rem;
+  border: none;
+  border-radius: 6px;
+  background: #5c7cfa;
+  color: #fff;
+}

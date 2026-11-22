@@ -113,7 +113,7 @@ def _one_turn(base_url: str, audio_b64: str, index: int) -> dict[str, float | in
         started = time.perf_counter()
         turn = client.post(
             f"{base_url}/sessions/{session_id}/turn",
-            json={"audio_b64": audio_b64},
+            json={"audio_b64": audio_b64, "skip_warmup": True},
         )
         e2e_ms = (time.perf_counter() - started) * 1000.0
     if turn.status_code != 200:

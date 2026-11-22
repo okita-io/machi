@@ -7,6 +7,7 @@ import {
   sendTurn,
   synthesizeSpeech,
   type CoachPayload,
+  type KeyPhrase,
   type NpcLine,
   type SessionStart,
   type TurnResult,
@@ -30,7 +31,9 @@ import {
   starsForLadder,
   type HintLadderState,
 } from "./hintLadder";
+import { bestCorrections, goalChecklist, turnKind, type Phase } from "./flow";
 import type { MouthFrame } from "./mouth";
+import { BriefingScreen, DebriefScreen, WarmupScreen } from "./phases";
 import "./App.css";
 
 function SubtitleLine({
@@ -74,6 +77,10 @@ export default function App() {
   const [mouth, setMouth] = useState<MouthFrame>("closed");
   const [hearing, setHearing] = useState(false);
   const [hintError, setHintError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase>("briefing");
+  const [warmupPhrase, setWarmupPhrase] = useState<KeyPhrase | null>(null);
+  const [warmupIndex, setWarmupIndex] = useState(0);
+  const [debrief, setDebrief] = useState<TurnResult | null>(null);
   const hintMaxRef = useRef<Record<string, number>>({});
   const sessionIdRef = useRef<string | null>(null);
 
@@ -86,10 +93,47 @@ export default function App() {
 
   const applyTurn = useCallback(
     (result: TurnResult) => {
+      const kind = turnKind(result);
       // Start NPC audio before coach state. A pending note must not delay playback.
       if (result.tts_audio_b64) playNpcAudio(result.tts_audio_b64, onMouth);
-      setLearner(result.learner);
-      setNpc(result.npc);
+      if (result.learner_text) setLearner(result.learner);
+      if (result.npc?.ja) setNpc(result.npc);
+      if (result.reset) {
+        setGoals([]);
+        setDebrief(null);
+        setWarmupPhrase(null);
+        setWarmupIndex(0);
+        setCoach(null);
+        setCoachPending(false);
+        setMouth("closed");
+        setHintEpoch(0);
+        setLadder((prev) =>
+          createHintLadder(prev?.level ?? DEFAULT_HINT_LEVEL, result.node_expects?.[0] ?? ""),
+        );
+        setPhase(kind === "briefing" ? "briefing" : "roleplay");
+        if (kind !== "briefing") setInput("ふたりです");
+        return;
+      }
+      if (kind === "warmup") {
+        const done = Boolean(result.warmup_complete) || result.phase === "roleplay";
+        setPhase(done ? "roleplay" : "warmup");
+        setWarmupPhrase(done ? null : result.next_phrase ?? result.phrase ?? null);
+        setWarmupIndex(result.warmup_index ?? 0);
+        setCoachPending(false);
+        setCoach(result.coach);
+        if (done) setInput("ふたりです");
+        else setInput("");
+        return;
+      }
+      if (kind === "debrief") {
+        setPhase("debrief");
+        setDebrief(result);
+        setGoals(result.completed_goals);
+        setCoachPending(false);
+        setCoach(result.coach);
+        return;
+      }
+      setPhase("roleplay");
       setGoals(result.completed_goals);
       setHintEpoch((n) => n + 1);
       setLadder((prev) => {
@@ -124,6 +168,10 @@ export default function App() {
       setCoach(null);
       setCoachPending(false);
       setMouth("closed");
+      setPhase(s.phase ?? "briefing");
+      setWarmupPhrase(null);
+      setWarmupIndex(0);
+      setDebrief(null);
       setLadder(createHintLadder(level, s.node_expects?.[0] ?? ""));
       setHintEpoch(0);
     })();
@@ -136,12 +184,12 @@ export default function App() {
   const goalId = ladder?.goalId ?? "";
 
   useEffect(() => {
-    if (!goalId) return;
+    if (phase !== "roleplay" || !goalId) return;
     const timer = window.setTimeout(() => {
       setLadder((prev) => (prev ? reduceHintLadder(prev, { type: "timeout" }) : prev));
     }, HINT_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
-  }, [goalId, rung, hintEpoch]);
+  }, [goalId, rung, hintEpoch, phase]);
 
   useEffect(() => {
     if (!coachPending) return;
@@ -171,9 +219,34 @@ export default function App() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!session || busy || mic.sending) return;
+    if (phase !== "roleplay" && phase !== "warmup") return;
     setBusy(true);
     try {
       applyTurn(await sendTurn(session.session_id, input, hintMaxRef.current));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startWarmup() {
+    if (!session || busy) return;
+    setBusy(true);
+    try {
+      applyTurn(await sendTurn(session.session_id, "", {}, { advance: "warmup" }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restart(mode: "briefing" | "replay") {
+    if (!session || busy) return;
+    setBusy(true);
+    try {
+      applyTurn(
+        await sendTurn(session.session_id, "", {}, {
+          advance: mode === "briefing" ? "briefing" : "replay",
+        }),
+      );
     } finally {
       setBusy(false);
     }
@@ -204,6 +277,13 @@ export default function App() {
   const goal = session.goals.find((item) => item.id === goalId) ?? null;
   const view = hintView(goal, session.key_phrases, rung);
   const stars = starsForLadder(ladder, session.stars);
+  const checklist = goalChecklist(
+    session.goals,
+    session.required_goals ?? session.goals.filter((item) => !item.optional).map((item) => item.id),
+    debrief?.completed_goals ?? goals,
+  );
+  const corrections = bestCorrections(debrief?.corrections ?? []);
+  const talking = phase === "roleplay" || phase === "warmup";
   const expression: SoraExpression = coachPending
     ? "think"
     : coach
@@ -246,6 +326,35 @@ export default function App() {
             {expression}
           </span>
         </div>
+        {phase === "briefing" ? (
+          <BriefingScreen
+            title={session.title_en || "Today's visit"}
+            goals={checklist}
+            phrases={session.key_phrases}
+            hearing={hearing}
+            onHear={(text) => void onHear(text)}
+            onStart={() => void startWarmup()}
+          />
+        ) : null}
+        {phase === "warmup" && warmupPhrase ? (
+          <WarmupScreen
+            phrase={warmupPhrase}
+            index={warmupIndex}
+            total={session.key_phrases.length}
+            hearing={hearing}
+            onHear={(text) => void onHear(text)}
+          />
+        ) : null}
+        {phase === "debrief" && debrief ? (
+          <DebriefScreen
+            stars={debrief.stars ?? stars.stars}
+            goals={checklist}
+            corrections={corrections}
+            onReplay={() => void restart("replay")}
+            onBriefing={() => void restart("briefing")}
+          />
+        ) : null}
+        {phase === "roleplay" ? (
         <div className="hint-card">
           <p className="hint-kicker">
             {goal ? `Goal · rung ${view.rung}` : "Listen"}
@@ -270,6 +379,7 @@ export default function App() {
           </div>
           {hintError ? <p className="hint-error">{hintError}</p> : null}
         </div>
+        ) : null}
         {npc && (
           <div className="subtitle">
             {learner && <SubtitleLine role="learner" label="You" line={learner} level={level} />}
@@ -313,7 +423,7 @@ export default function App() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            disabled={busy || mic.sending || mic.recording}
+            disabled={!talking || busy || mic.sending || mic.recording}
           />
         </label>
         <div className="mic-controls">
@@ -321,7 +431,7 @@ export default function App() {
             type="button"
             className={mic.recording ? "mic-button live" : "mic-button"}
             aria-pressed={mic.recording}
-            disabled={!mic.ready || ((busy || mic.sending) && !mic.recording)}
+            disabled={!talking || !mic.ready || ((busy || mic.sending) && !mic.recording)}
             onPointerDown={(e) => {
               e.preventDefault();
               e.currentTarget.setPointerCapture(e.pointerId);
@@ -355,7 +465,7 @@ export default function App() {
                   : "Connecting microphone channel…"}
           </p>
         </div>
-        <button type="submit" disabled={busy || mic.sending || mic.recording}>
+        <button type="submit" disabled={!talking || busy || mic.sending || mic.recording}>
           {busy || mic.sending ? "…" : "Send turn"}
         </button>
       </form>

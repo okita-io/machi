@@ -60,7 +60,10 @@ def test_text_turn_omits_asr_header_and_logs_null(caplog):
         )
         assert created.status_code == 200
         sid = created.json()["session_id"]
-        turn = client.post(f"/sessions/{sid}/turn", json={"text": "ふたりです"})
+        turn = client.post(
+            f"/sessions/{sid}/turn",
+            json={"text": "ふたりです", "skip_warmup": True},
+        )
 
     assert turn.status_code == 200
     transcribe.assert_not_called()
@@ -94,7 +97,10 @@ def test_audio_turn_records_asr_header():
             json={"scenario_id": "restaurant_ramen_01", "level": 1},
         )
         sid = created.json()["session_id"]
-        turn = client.post(f"/sessions/{sid}/turn", json={"audio_b64": audio_b64})
+        turn = client.post(
+            f"/sessions/{sid}/turn",
+            json={"audio_b64": audio_b64, "skip_warmup": True},
+        )
 
     assert turn.status_code == 200
     assert float(turn.headers["x-latency-asr"]) >= 0

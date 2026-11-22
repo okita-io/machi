@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml ./
 COPY machi ./machi
+COPY prompts ./prompts
 
 # Main deps include cutlet, fugashi, and unidic-lite (furigana + romaji).
 RUN pip install --no-cache-dir .

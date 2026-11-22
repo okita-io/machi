@@ -164,10 +164,10 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M1-05 | [ ] | **Irodori-TTS v4.1 Small** for Sora (`guide` voice in YAML) | M0-10 | Distinct voice id for guide vs NPC |
 | M1-06 | [x] | Lip flap via Web Audio analyser on TTS output | S0-07, M0-10 | Mouth sprite cycles with loudness |
 | M1-07 | [ ] | Pre-baked WebP background + sprite sheet for ramen (`assets/`) | — | Replace SVG placeholders; `scene.background` paths in YAML |
-| M1-08 | [ ] | Scenario flow: debrief node (stars, goals, two corrections) | S0-03 | UI screen after `pay.end`; required goals from `success.required` |
-| M1-09 | [ ] | Briefing + warm-up steps before role-play | S0-02 | Key phrases with tap-to-hear (TTS) |
+| M1-08 | [x] | Scenario flow: debrief node (stars, goals, two corrections) | S0-03 | UI screen after `pay.end`; required goals from `success.required` |
+| M1-09 | [x] | Briefing + warm-up steps before role-play | S0-02 | Key phrases with tap-to-hear (TTS) |
 | M1-10 | [ ] | Expand SQLite: stars, hint max per goal, completion flag | S0-04 | Schema migration or version table; debrief writes summary |
-| M1-11 | [ ] | LLM NPC + tutor prompt templates from spec | S0-05 | Template files under `orchestrator/prompts/`; JSON tutor schema validated |
+| M1-11 | [x] | LLM NPC + tutor prompt templates from spec | S0-05 | Template files under `orchestrator/prompts/`; JSON tutor schema validated |
 | M1-12 | [ ] | Pre-rendered NPC line audio at bake time for fixed `flow.nodes.*.npc` | M0-10, M1-07 | `assets/audio/` map; orchestrator prefers file over live TTS when present |
 
 ---
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M0-12 (e2e latency), M0-13 (accent fixtures), M1-03 (hint ladder), M1-04 (coach drawer), and M1-06 (lip flap). Scaffold baseline remains PR #1._
+_Last updated with M1-08 (debrief), M1-09 (briefing and warm-up), and M1-11 (prompt templates). Scaffold baseline remains PR #1._

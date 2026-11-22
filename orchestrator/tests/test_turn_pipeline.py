@@ -97,7 +97,10 @@ def test_audio_b64_only_turn_runs_asr_llm_tts(monkeypatch):
         )
         assert created.status_code == 200
         sid = created.json()["session_id"]
-        turn = client.post(f"/sessions/{sid}/turn", json={"audio_b64": audio_b64})
+        turn = client.post(
+            f"/sessions/{sid}/turn",
+            json={"audio_b64": audio_b64, "skip_warmup": True},
+        )
 
     assert turn.status_code == 200
     body = turn.json()
@@ -145,7 +148,7 @@ def test_blank_text_still_transcribes_audio(monkeypatch):
         sid = created.json()["session_id"]
         turn = client.post(
             f"/sessions/{sid}/turn",
-            json={"text": "   ", "audio_b64": audio_b64},
+            json={"text": "   ", "audio_b64": audio_b64, "skip_warmup": True},
         )
 
     assert turn.status_code == 200
@@ -161,7 +164,10 @@ def test_invalid_audio_b64_is_400():
             json={"scenario_id": "restaurant_ramen_01", "level": 1},
         )
         sid = created.json()["session_id"]
-        turn = client.post(f"/sessions/{sid}/turn", json={"audio_b64": "!!!!"})
+        turn = client.post(
+            f"/sessions/{sid}/turn",
+            json={"audio_b64": "!!!!", "skip_warmup": True},
+        )
 
     assert turn.status_code == 400
     assert turn.json()["detail"] == "invalid audio_b64"
@@ -180,7 +186,10 @@ def test_asr_outage_is_502(monkeypatch):
             json={"scenario_id": "restaurant_ramen_01", "level": 1},
         )
         sid = created.json()["session_id"]
-        turn = client.post(f"/sessions/{sid}/turn", json={"audio_b64": audio_b64})
+        turn = client.post(
+            f"/sessions/{sid}/turn",
+            json={"audio_b64": audio_b64, "skip_warmup": True},
+        )
 
     assert turn.status_code == 502
     assert turn.json()["detail"] == "asr_unavailable"
@@ -199,7 +208,7 @@ def test_ws_turn_without_text_runs_same_pipeline(monkeypatch):
         )
         sid = created.json()["session_id"]
         with client.websocket_connect(f"/ws/{sid}") as ws:
-            ws.send_json({"type": "turn", "audio_b64": audio_b64})
+            ws.send_json({"type": "turn", "audio_b64": audio_b64, "skip_warmup": True})
             result = ws.receive_json()
 
     assert result["type"] == "turn_result"
@@ -223,7 +232,7 @@ def test_ws_invalid_audio_b64_reports_detail():
         )
         sid = created.json()["session_id"]
         with client.websocket_connect(f"/ws/{sid}") as ws:
-            ws.send_json({"type": "turn", "audio_b64": "not-base64"})
+            ws.send_json({"type": "turn", "audio_b64": "not-base64", "skip_warmup": True})
             result = ws.receive_json()
 
     assert result == {"type": "error", "detail": "invalid audio_b64"}
@@ -253,7 +262,10 @@ def test_slow_tutor_does_not_block_npc_audio(monkeypatch):
         )
         sid = created.json()["session_id"]
         started = time.perf_counter()
-        turn = client.post(f"/sessions/{sid}/turn", json={"text": "ふたりです"})
+        turn = client.post(
+            f"/sessions/{sid}/turn",
+            json={"text": "ふたりです", "skip_warmup": True},
+        )
         elapsed = time.perf_counter() - started
         task = PENDING_COACH.get(sid)
         if task is not None and not task.done():

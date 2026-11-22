@@ -10,6 +10,7 @@ hint_defaults:
   4: none
 scene:
   background: bg/laundry.webp
+  sprite: sprites/sora/neutral.webp
   ambience: sfx/laundry_loop.ogg
   hotspots:
     - rect: [80, 200, 140, 180]
@@ -47,6 +48,7 @@ npc:
     4: fast
 guide:
   id: sora
+  sprite: sprites/sora/neutral.webp
   brief_en: "Find an open washer, say whether your load includes detergent, pay with coins, and start machine 3."
   voice:
     engine: irodori

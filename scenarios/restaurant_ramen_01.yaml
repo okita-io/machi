@@ -4,7 +4,8 @@ title:
   ja: "ラーメン屋"
 level: [1, 2, 3]
 scene:
-  background: bg/ramen_counter_day.svg
+  background: bg/ramen.webp
+  sprite: sprites/sora/neutral.webp
   ambience: sfx/ramen_shop_loop.ogg
   hotspots:
     - rect: [812, 140, 210, 60]
@@ -31,6 +32,7 @@ npc:
     4: fast
 guide:
   id: sora
+  sprite: sprites/sora/neutral.webp
   voice:
     engine: irodori
     design: "gentle young woman, warm, slightly playful"

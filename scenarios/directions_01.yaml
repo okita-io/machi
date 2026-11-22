@@ -10,6 +10,7 @@ hint_defaults:
   4: none
 scene:
   background: bg/street.webp
+  sprite: sprites/sora/neutral.webp
   ambience: sfx/street_loop.ogg
   # Pins the mini-map draws. ghost_path is the SVG polyline through them.
   ghost_path: "64,204 174,184 240,140 308,88"
@@ -54,6 +55,7 @@ npc:
     4: fast
 guide:
   id: sora
+  sprite: sprites/sora/neutral.webp
   brief_en: "You are on a street corner and need the station. Ask where it is, confirm the right then the left turn, and stop on the station pin."
   voice:
     engine: irodori

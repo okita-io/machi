@@ -22,12 +22,23 @@ def test_health_and_session_flow():
         assert health.status_code == 200
         assert health.json()["status"] == "ok"
 
+        listed = client.get("/scenarios")
+        assert listed.status_code == 200
+        cards = listed.json()
+        ramen = next(card for card in cards if card["id"] == "restaurant_ramen_01")
+        assert ramen["title_ja"] == "ラーメン屋"
+        assert ramen["scene"]["background"].endswith("/bg/ramen.webp")
+        assert ramen["scene"]["sprite"].endswith("/sprites/sora/neutral.webp")
+
         created = client.post(
             "/sessions",
             json={"scenario_id": "restaurant_ramen_01", "level": 1},
         )
         assert created.status_code == 200
-        sid = created.json()["session_id"]
+        created_body = created.json()
+        sid = created_body["session_id"]
+        assert created_body["scene"]["background"].endswith("/bg/ramen.webp")
+        assert created_body["scene"]["guide_sprite"].endswith("/sprites/sora/neutral.webp")
 
         turn = client.post(
             f"/sessions/{sid}/turn",

@@ -4,11 +4,13 @@ import { useMic } from "./audio/useMic";
 import {
   createSession,
   fetchCoach,
+  listScenarios,
   sendTurn,
   synthesizeSpeech,
   type CoachPayload,
   type KeyPhrase,
   type NpcLine,
+  type ScenarioSummary,
   type SessionStart,
   type TurnResult,
 } from "./api";
@@ -32,9 +34,29 @@ import {
   type HintLadderState,
 } from "./hintLadder";
 import { bestCorrections, goalChecklist, turnKind, type Phase } from "./flow";
+import { KeyedSprite } from "./KeyedSprite";
 import type { MouthFrame } from "./mouth";
 import { BriefingScreen, DebriefScreen, WarmupScreen } from "./phases";
+import { soraSpriteUrl } from "./sprites";
+import { townMapUrl } from "./townMap";
+import { TownView } from "./TownView";
 import "./App.css";
+
+type AppRoute = "town" | "play";
+
+function routeFromHash(): AppRoute {
+  return window.location.hash === "#/town" ? "town" : "play";
+}
+
+function useHashRoute(): AppRoute {
+  const [route, setRoute] = useState<AppRoute>(routeFromHash);
+  useEffect(() => {
+    const onHash = () => setRoute(routeFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  return route;
+}
 
 function SubtitleLine({
   role,
@@ -62,7 +84,11 @@ function starGlyphs(count: number): string {
 }
 
 export default function App() {
+  const route = useHashRoute();
   const [level, setLevel] = useState<HintLevel>(DEFAULT_HINT_LEVEL);
+  const [scenarioId, setScenarioId] = useState("restaurant_ramen_01");
+  const [catalog, setCatalog] = useState<ScenarioSummary[] | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [session, setSession] = useState<SessionStart | null>(null);
   const [npc, setNpc] = useState<NpcLine | null>(null);
   const [learner, setLearner] = useState<NpcLine | null>(null);
@@ -159,7 +185,7 @@ export default function App() {
   useEffect(() => {
     let cancel = false;
     void (async () => {
-      const s = await createSession("restaurant_ramen_01", level);
+      const s = await createSession(scenarioId, level);
       if (cancel) return;
       setSession(s);
       setNpc(s.opening_npc);
@@ -178,7 +204,26 @@ export default function App() {
     return () => {
       cancel = true;
     };
-  }, [level]);
+  }, [level, scenarioId]);
+
+  useEffect(() => {
+    if (route !== "town") return;
+    let cancel = false;
+    void (async () => {
+      try {
+        const rows = await listScenarios();
+        if (!cancel) {
+          setCatalog(rows);
+          setCatalogError(null);
+        }
+      } catch {
+        if (!cancel) setCatalogError("Couldn't load the town.");
+      }
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [route]);
 
   const rung = ladder ? rungFor(ladder) : 1;
   const goalId = ladder?.goalId ?? "";
@@ -270,6 +315,59 @@ export default function App() {
     }
   }
 
+  function openTown() {
+    if (window.location.hash !== "#/town") window.location.hash = "#/town";
+  }
+
+  function openScene(id?: string) {
+    if (id) setScenarioId(id);
+    if (window.location.hash !== "#/play") window.location.hash = "#/play";
+  }
+
+  const nav = (
+    <nav className="view-nav" aria-label="Views">
+      <button type="button" className={route === "town" ? "active" : ""} onClick={openTown}>
+        Town
+      </button>
+      <button type="button" className={route === "play" ? "active" : ""} onClick={() => openScene()}>
+        Scene
+      </button>
+    </nav>
+  );
+
+  if (route === "town") {
+    const mapUrl = catalog?.[0]?.scene.background ? townMapUrl(catalog[0].scene.background) : "";
+    return (
+      <div className="app town-mode">
+        <header>
+          <h1>Machi</h1>
+          <span className="badge">CPU demo</span>
+          {nav}
+          <label className="level-control">
+            Level
+            <select
+              aria-label="Hint level"
+              value={level}
+              onChange={(e) => setLevel(parseHintLevel(e.target.value))}
+            >
+              {HINT_LEVELS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        </header>
+        {catalogError ? <p className="loading">{catalogError}</p> : null}
+        {catalog ? (
+          <TownView scenarios={catalog} mapUrl={mapUrl} onOpen={(id) => openScene(id)} />
+        ) : catalogError ? null : (
+          <div className="loading">Loading town…</div>
+        )}
+      </div>
+    );
+  }
+
   if (!session || !ladder) {
     return <div className="loading">Loading Machi…</div>;
   }
@@ -284,17 +382,19 @@ export default function App() {
   );
   const corrections = bestCorrections(debrief?.corrections ?? []);
   const talking = phase === "roleplay" || phase === "warmup";
-  const expression: SoraExpression = coachPending
+  const expression: SoraExpression | "neutral" = coachPending
     ? "think"
     : coach
       ? expressionFromCoach(coach)
-      : "happy";
+      : "neutral";
+  const spriteSrc = soraSpriteUrl(session.scene.guide_sprite, expression);
 
   return (
     <div className="app">
       <header>
         <h1>Machi</h1>
         <span className="badge">CPU demo</span>
+        {nav}
         <span className="stars" title={stars.rule}>
           {starGlyphs(stars.stars)}
         </span>
@@ -315,12 +415,7 @@ export default function App() {
       </header>
       <main className="stage" style={{ backgroundImage: `url(${session.scene.background})` }}>
         <div className="guide-slot">
-          <img
-            className="guide"
-            src={session.scene.guide_sprite}
-            alt="Sora"
-            data-expression={expression}
-          />
+          <KeyedSprite src={spriteSrc} expression={expression} />
           <span className={`mouth ${mouth}`} data-mouth={mouth} aria-hidden="true" />
           <span className="expression" data-expression={expression}>
             {expression}

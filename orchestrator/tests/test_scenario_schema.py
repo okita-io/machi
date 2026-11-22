@@ -119,6 +119,18 @@ def test_scenario_yaml_invariants(path: Path):
         for goal in spec.goals:
             assert goal.coach_en
 
+    backgrounds = {
+        "restaurant_ramen_01": "bg/ramen.webp",
+        "konbini_checkout_01": "bg/konbini.webp",
+        "directions_01": "bg/street.webp",
+        "coin_laundry_01": "bg/laundry.webp",
+        "taxi_01": "bg/taxi.webp",
+        "train_ticket_01": "bg/station.webp",
+    }
+    assert spec.scene.background == backgrounds[spec.id]
+    assert spec.scene.sprite == "sprites/sora/neutral.webp"
+    assert spec.guide.sprite == "sprites/sora/neutral.webp"
+
     if spec.id == "directions_01":
         assert spec.scene.background == "bg/street.webp"
         assert spec.scene.ghost_path

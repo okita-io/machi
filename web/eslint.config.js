@@ -35,6 +35,11 @@ export default tseslint.config(
       "src/coach.test.ts",
       "src/flow.ts",
       "src/flow.test.ts",
+      "src/chroma.ts",
+      "src/chroma.test.ts",
+      "src/sprites.ts",
+      "src/townMap.ts",
+      "src/townMap.test.ts",
     ],
     rules: {
       "react-refresh/only-export-components": "off",

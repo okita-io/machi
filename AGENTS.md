@@ -163,7 +163,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | M1-04 | [x] | Coach side panel (Sora out-of-role); never block NPC audio | S0-05 | Tutor JSON populates coach; parallel LLM call pattern from spec |
 | M1-05 | [ ] | **Irodori-TTS v4.1 Small** for Sora (`guide` voice in YAML) | M0-10 | Distinct voice id for guide vs NPC |
 | M1-06 | [x] | Lip flap via Web Audio analyser on TTS output | S0-07, M0-10 | Mouth sprite cycles with loudness |
-| M1-07 | [ ] | Pre-baked WebP background + sprite sheet for ramen (`assets/`) | — | Replace SVG placeholders; `scene.background` paths in YAML |
+| M1-07 | [x] | Pre-baked WebP background + sprite sheet for ramen (`assets/`) | — | Replace SVG placeholders; `scene.background` paths in YAML |
 | M1-08 | [x] | Scenario flow: debrief node (stars, goals, two corrections) | S0-03 | UI screen after `pay.end`; required goals from `success.required` |
 | M1-09 | [x] | Briefing + warm-up steps before role-play | S0-02 | Key phrases with tap-to-hear (TTS) |
 | M1-10 | [x] | Expand SQLite: stars, hint max per goal, completion flag | S0-04 | Schema migration or version table; debrief writes summary |
@@ -194,7 +194,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| M3-01 | [ ] | Town map UI — pick building / locked scenarios | M1-07 | New route in `web/`; lists `GET /scenarios` |
+| M3-01 | [x] | Town map UI — pick building / locked scenarios | M1-07 | New route in `web/`; lists `GET /scenarios` |
 | M3-02 | [x] | YAML: konbini checkout | S0-02 | Validates; playthrough with CPU or GPU stack |
 | M3-03 | [x] | YAML: directions + **SVG mini-map** + ghost path | M3-01 | Hotspots + pin movement per NPC directions |
 | M3-04 | [x] | YAML: coin laundry (signage goals) | S0-02 | Tappable hotspots from `scene.hotspots` |

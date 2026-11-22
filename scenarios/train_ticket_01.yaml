@@ -9,7 +9,8 @@ hint_defaults:
   3: kana
   4: none
 scene:
-  background: bg/ticket_window.webp
+  background: bg/station.webp
+  sprite: sprites/sora/neutral.webp
   ambience: sfx/station_loop.ogg
   hotspots:
     - rect: [60, 160, 200, 220]
@@ -41,6 +42,7 @@ npc:
     4: fast
 guide:
   id: sora
+  sprite: sprites/sora/neutral.webp
   brief_en: "Buy one ticket to Shinagawa, confirm 180 yen, pay, and ask which platform to use."
   voice:
     engine: irodori

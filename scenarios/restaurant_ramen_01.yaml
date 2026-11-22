@@ -2,7 +2,7 @@ id: restaurant_ramen_01
 title:
   en: "Ramen shop: a table for two"
   ja: "ラーメン屋"
-level: [1, 2, 3]
+level: [1, 2, 3, 4]
 scene:
   background: bg/ramen.webp
   sprite: sprites/sora/neutral.webp
@@ -77,6 +77,26 @@ goals:
       - "カード"
       - "カードで"
       - "カードで大丈夫ですか"
+  - id: noodle_firmness
+    prompt_en: "Choose a noodle firmness: firm, regular, or soft."
+    optional: true
+    coach_en: "Say かため (firm), ふつう (regular), or やわらかめ (soft)."
+    accept:
+      - "かため"
+      - "硬め"
+      - "固め"
+      - "katame"
+      - "かためで"
+      - "ふつう"
+      - "普通"
+      - "futsuu"
+      - "futsu"
+      - "ふつうで"
+      - "やわらかめ"
+      - "柔らかめ"
+      - "軟らかめ"
+      - "yawarakame"
+      - "やわらかめで"
 key_phrases:
   - ja: "二人です"
     kana: "ふたりです"
@@ -114,15 +134,25 @@ flow:
       npc_kana: "こちらのおせきへどうぞ。ごちゅうもんがおきまりでしたらおよびください。"
       expects: [order, ask_water]
       on_success:
-        order: confirm_order
+        order: order_curveball
         ask_water: confirm_order
+    order_curveball:
+      kind: branch
+      condition:
+        level_gte: 3
+      high: noodle_firmness
+      low: confirm_order
+    noodle_firmness:
+      npc: "麺の硬さは硬め・普通・やわらかめのどれになさいますか？"
+      npc_kana: "めんのかたさはかため・ふつう・やわらかめのどれになさいますか？"
+      expects: noodle_firmness
+      on_success: confirm_order
+      on_other:
+        clarify: "硬め、普通、やわらかめのどれになさいますか？"
+        max_retries: 2
     confirm_order:
       npc: "醤油ラーメンお一つですね。少々お待ちください。"
       npc_kana: "しょうゆラーメンおひとつですね。しょうしょうおまちください。"
-      branch:
-        - when:
-            level_gte: 3
-          surprise: "麺の硬さはどうなさいますか？"
       next: pay
     pay:
       expects: pay

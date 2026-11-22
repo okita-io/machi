@@ -142,3 +142,84 @@ def test_scripted_playthrough_reaches_debrief_with_tutor_corrections():
     ruby = body["corrections"][1]["ruby_html"]
     assert "<ruby>" in ruby and "<rt>" in ruby
     assert "だいじょうぶ" in ruby
+
+
+FIRMNESS_COACH = "Say かため (firm), ふつう (regular), or やわらかめ (soft)."
+
+
+def _play(client, level: int, lines: list[str]) -> list[dict]:
+    created = client.post(
+        "/sessions",
+        json={"scenario_id": "restaurant_ramen_01", "level": level},
+    )
+    assert created.status_code == 200
+    sid = created.json()["session_id"]
+    bodies: list[dict] = []
+    for index, text in enumerate(lines):
+        response = client.post(
+            f"/sessions/{sid}/turn",
+            json={"text": text, "skip_warmup": index == 0},
+        )
+        assert response.status_code == 200, response.text
+        bodies.append(response.json())
+    return bodies
+
+
+def test_level2_playthrough_skips_firmness():
+    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+        del text, voice
+        return b"RIFF"
+
+    with (
+        patch("machi.main.synthesize", new=AsyncMock(side_effect=fake_synthesize)),
+        TestClient(app) as client,
+    ):
+        bodies = _play(
+            client,
+            2,
+            ["ふたりです", "醤油ラーメン", "うん", "お会計お願いします"],
+        )
+
+    assert [body["node_id"] for body in bodies] == ["seat", "confirm_order", "pay", "debrief"]
+    assert all("硬め" not in body["npc"]["ja"] for body in bodies)
+    assert all("noodle_firmness" not in body["goal_hits"] for body in bodies)
+    assert bodies[-1]["type"] == "debrief"
+    assert bodies[-1]["goals_completed"] == ["party_size", "order", "pay"]
+
+
+def test_level4_firmness_advances_and_wrong_retries_with_coach_note():
+    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+        del text, voice
+        return b"RIFF"
+
+    with (
+        patch("machi.main.synthesize", new=AsyncMock(side_effect=fake_synthesize)),
+        TestClient(app) as client,
+    ):
+        bodies = _play(
+            client,
+            4,
+            [
+                "ふたりです",
+                "醤油ラーメン",
+                "わからない",
+                "yawarakame",
+                "うん",
+                "お会計お願いします",
+            ],
+        )
+
+    assert bodies[1]["node_id"] == "noodle_firmness"
+    assert "硬め" in bodies[1]["npc"]["ja"]
+    assert "普通" in bodies[1]["npc"]["ja"]
+    assert "やわらかめ" in bodies[1]["npc"]["ja"]
+    missed = bodies[2]
+    assert missed["accepted"] is False
+    assert missed["node_id"] == "noodle_firmness"
+    assert missed["goal_hits"] == []
+    assert missed["coach"]["coach_note_en"] == FIRMNESS_COACH
+    assert bodies[3]["accepted"] is True
+    assert bodies[3]["goal_hits"] == ["noodle_firmness"]
+    assert bodies[3]["node_id"] == "confirm_order"
+    assert bodies[-1]["type"] == "debrief"
+    assert bodies[-1]["goals_completed"] == ["party_size", "order", "pay"]

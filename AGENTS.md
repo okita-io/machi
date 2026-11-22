@@ -208,7 +208,7 @@ Status: `[x]` done, `[ ]` not started, `[-]` in progress.
 
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| M4-01 | [ ] | Level 3/4 curveballs (`flow.branch` when `level_gte`) | M1-11 | Restaurant firmness question at L3+ |
+| M4-01 | [x] | Level 3/4 curveballs (`flow.branch` when `level_gte`) | M1-11 | Restaurant firmness question at L3+ |
 | M4-02 | [x] | Sora expression set (6–8) + per-NPC voice map | M1-07, M1-05 | `voices/voices.yaml` complete |
 | M4-03 | [x] | Phone layout (9:16 crop) | M1-07 | Responsive CSS; playable on mobile browser |
 | M4-04 | [x] | HTTPS for LAN (self-signed or Tailscale) | M0-01 | Mic works on phone; documented in README |
@@ -270,9 +270,9 @@ Status: `[x]` done, `[ ]` not started, `[-]` in progress.
 | M1 Ramen MVP | 12 | 11 |
 | M2 Coaching | 7 | 5 |
 | M3 Neighborhood | 7 | 7 |
-| M4 Polish | 5 | 3 |
+| M4 Polish | 5 | 4 |
 | M5 Optional | 3 | 2 |
 | INFRA | 5 | 1 |
-| **Total** | **63** | **48** |
+| **Total** | **63** | **49** |
 
-_Last updated after M5 batch (S0/M0/M1/M2/M3/M4/M5/INFRA automated runs)._
+_Last updated after M4-01 (level curveballs)._

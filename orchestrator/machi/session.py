@@ -42,6 +42,7 @@ class SessionState:
     def __post_init__(self) -> None:
         if not self.node_id:
             self.node_id = self.scenario.flow.start
+        follow_branch(self)
         if self.hint_rung == 1:
             self.hint_rung = default_rung_for_level(self.level)
 
@@ -84,6 +85,25 @@ def evaluate_turn(
     return hits, success
 
 
+def follow_branch(state: SessionState) -> None:
+    """Walk silent ``kind: branch`` nodes using the session learner level (1–4).
+
+    ``level >= condition.level_gte`` takes ``high``; a lower level takes ``low``.
+    Chained gates resolve in one step so a branch never stays the current node.
+    """
+    seen: set[str] = set()
+    while state.node_id not in seen:
+        node = state.scenario.flow.nodes[state.node_id]
+        if node.kind != "branch" or node.condition is None:
+            return
+        seen.add(state.node_id)
+        target = node.high if state.level >= node.condition.level_gte else node.low
+        if not target or target not in state.scenario.flow.nodes:
+            return
+        state.node_id = target
+        state.retries = 0
+
+
 def advance_node(
     state: SessionState,
     goal_hits: list[str],
@@ -97,9 +117,7 @@ def advance_node(
     if progressed and not expected_goals(node) and node.next:
         state.node_id = node.next
         state.retries = 0
-        return state.node_id
-
-    if goal_hits and node.on_success is not None:
+    elif goal_hits and node.on_success is not None:
         if isinstance(node.on_success, str):
             state.node_id = node.on_success
         elif isinstance(node.on_success, dict):
@@ -108,21 +126,20 @@ def advance_node(
                     state.node_id = node.on_success[g]
                     break
         state.retries = 0
-        return state.node_id
-
-    if node.next:
+    elif node.next:
         state.node_id = node.next
         state.retries = 0
-        return state.node_id
 
+    follow_branch(state)
     return state.node_id
 
 
 def maybe_chain_narration(state: SessionState) -> None:
     """Skip narration-only nodes (no NPC line) toward the next interactive step."""
-    for _ in range(4):
+    for _ in range(8):
+        follow_branch(state)
         node = state.scenario.flow.nodes[state.node_id]
-        if node.npc or node.expects or node.end:
+        if node.kind == "branch" or node.npc or node.expects or node.end:
             break
         if node.next:
             state.node_id = node.next
@@ -168,6 +185,7 @@ def scenario_complete(state: SessionState) -> bool:
 def reset_flow(state: SessionState, *, phase: str) -> None:
     state.phase = phase
     state.node_id = state.scenario.flow.start
+    follow_branch(state)
     state.completed_goals = set()
     state.retries = 0
     state.warmup_index = 0

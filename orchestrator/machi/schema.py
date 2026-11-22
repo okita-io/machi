@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _FORBID = ConfigDict(extra="forbid")
 
@@ -88,26 +88,50 @@ class FlowOther(BaseModel):
     max_retries: int = 2
 
 
-class FlowBranch(BaseModel):
+class BranchCondition(BaseModel):
+    """Curveball gate. ``level_gte`` is compared to the session learner level (1–4)."""
+
     model_config = _FORBID
-    when: dict[str, int] | None = None
-    surprise: str | None = None
+    level_gte: int
+
+    @field_validator("level_gte")
+    @classmethod
+    def level_in_range(cls, value: int) -> int:
+        if not 1 <= value <= 4:
+            raise ValueError("level_gte must be between 1 and 4")
+        return value
 
 
 class FlowNode(BaseModel):
     model_config = _FORBID
+    # ``speak`` is a normal line. ``branch`` is silent and picks high or low.
+    kind: Literal["speak", "branch"] = "speak"
+    condition: BranchCondition | None = None
+    high: str | None = None
+    low: str | None = None
     npc: str | None = None
     npc_kana: str | None = None
     expects: str | list[str] | None = None
     on_success: str | dict[str, str] | None = None
     on_other: FlowOther | None = None
     next: str | None = None
-    branch: list[FlowBranch] = Field(default_factory=list)
     narration_en: str | None = None
     npc_on_success: str | None = None
     npc_on_success_kana: str | None = None
     end: bool = False
     debrief: bool = False
+
+    @model_validator(mode="after")
+    def branch_has_condition_and_targets(self) -> FlowNode:
+        if self.kind == "branch":
+            if self.condition is None:
+                raise ValueError("branch nodes require condition.level_gte")
+            if not self.high or not self.low:
+                raise ValueError("branch nodes require high and low targets")
+            return self
+        if self.condition is not None or self.high or self.low:
+            raise ValueError("condition, high, and low belong on kind: branch")
+        return self
 
 
 class FlowSpec(BaseModel):

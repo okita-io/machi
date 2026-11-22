@@ -123,7 +123,7 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | S0-08 | [x] | `speech-cpu` mock ASR/TTS HTTP API | — | `POST /v1/transcribe` with `text`; `POST /v1/synthesize` returns WAV b64 |
 | S0-09 | [x] | GPU stubs `asr/`, `tts/`, `pron/` | — | `/health` returns stub message; not used in `cpu` profile |
 | S0-10 | [x] | CI: ruff, pytest, eslint, vite build | — | Workflow in `.github/workflows/ci.yml`; all commands pass locally |
-| S0-11 | [ ] | Latency logging on orchestrator turns (stages: ASR, LLM, TTS) | S0-03 | Structured log or `X-Latency-*` headers; unit test on timer hooks |
+| S0-11 | [x] | Latency logging on orchestrator turns (stages: ASR, LLM, TTS) | S0-03 | Structured log or `X-Latency-*` headers; unit test on timer hooks |
 
 ---
 

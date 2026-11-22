@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     scenarios_path: str = "/scenarios"
     db_path: str = "/data/machi.sqlite"
     assets_base_url: str = "http://assets:8080"
+    # Directory with baked NPC audio under audio/{scenario_id}/. Empty disables the cache.
+    assets_path: str = "/assets"
 
     # Hands-free only. Push-to-talk does not read these.
     vad_enabled: bool = True

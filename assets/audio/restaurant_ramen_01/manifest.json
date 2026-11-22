@@ -1,0 +1,9 @@
+{
+  "scenario_id": "restaurant_ramen_01",
+  "voice": "qwen3_tts",
+  "lines": {
+    "greet": "greet.wav",
+    "seat": "seat.wav",
+    "confirm_order": "confirm_order.wav"
+  }
+}

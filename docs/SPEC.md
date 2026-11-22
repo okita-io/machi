@@ -43,7 +43,9 @@
 4. **Role-play** — Sora as staff; learner speaks; subtitles with furigana at hint level
 5. **Hint ladder** — silence, wrong move, or Help climbs one rung (lowers stars)
 6. **Coach timeouts** — understandable mistakes get in-character NPC reaction + coach note
-7. **Debrief** — after the closing node (`debrief: true` in the scenario flow), the turn returns `type: debrief` with stars, the required goals from `success.required`, and up to two tutor corrections (Japanese with furigana and romaji, plus English). SRS deck updates come later. Replay and return-to-briefing reset the same session.
+7. **Debrief** — after the closing node (`debrief: true` in the scenario flow), the turn returns `type: debrief` with stars, the required goals from `success.required`, and up to two tutor corrections (Japanese with furigana and romaji, plus English). That turn also writes the summary to SQLite. SRS deck updates come later. Replay and return-to-briefing reset the same session.
+
+`schema_version` records the SQLite schema. v2 adds `stars`, `max_hint_rung`, and `completed` on `sessions`, and `hint_rung`, `correction_ja`, and `correction_en` on `attempts`. A v1 file (sessions and attempts only) is altered in place. Debrief stores stars, the completion flag, and the max hint rung on the session, and one `hint:{goal_id}` attempt row per goal for the per-goal peak. `GET /sessions/{id}/progress` returns that summary plus spoken attempts. `GET /sessions` lists saved sessions.
 
 ### Scenarios
 
@@ -107,7 +109,9 @@ Push-to-talk (`hands_free` false) does not run VAD or the turn scorer. The clien
 
 `POST /sessions/{id}/turn` accepts `{ "audio_b64": "<pcm>" }` with no `text`. The orchestrator decodes that PCM, transcribes it at `ASR_URL` (`POST /v1/transcribe`), runs the NPC and tutor LLM calls on the transcript, then synthesizes the NPC line at `TTS_URL`. The JSON response includes `learner_text`, `npc.ja`, `npc.romaji`, and `tts_audio_b64`. A WebSocket `turn` that carries only `audio_b64` (or buffered PCM and no `text`) uses the same pipeline. Typed `text` still skips ASR. Blank `text` does not count as a typed turn.
 
-Each turn logs one JSON line (`event: turn_latency`) with `stages_ms` for ASR, LLM, and TTS and a `cancelled` flag. HTTP `POST /sessions/{id}/turn` also sets `X-Latency-ASR`, `X-Latency-LLM`, and `X-Latency-TTS` (milliseconds). A stage that did not run — typed text skips ASR — is `null` in the log and its header is omitted. `cancelled` is false when the turn finishes. It is true when barge-in aborts the turn; stages that had already started still report elapsed time.
+Fixed `flow.nodes.*.npc` lines can be baked with `scripts/bake_npc_audio.py`. The script posts each line to `TTS_URL/v1/synthesize` and writes `assets/audio/{scenario_id}/{node_id}.wav` plus `manifest.json` (`lines` maps node id to filename). On a turn, if the spoken text is still that node's `npc` line and the file exists under `ASSETS_PATH`, the response uses the file as `tts_audio_b64`. Otherwise the orchestrator calls live TTS. The restaurant scenario ships CPU-stub wavs; regenerate them with the script when a real voice is available.
+
+Each turn logs one JSON line (`event: turn_latency`) with `stages_ms` for ASR, LLM, and TTS, a `sources` object, and a `cancelled` flag. TTS source is `cache` or `live`. HTTP `POST /sessions/{id}/turn` also sets `X-Latency-ASR`, `X-Latency-LLM`, `X-Latency-TTS` (milliseconds), and `X-Latency-TTS-Source` when TTS ran. A stage that did not run — typed text skips ASR — is `null` in the log and its header is omitted. `cancelled` is false when the turn finishes. It is true when barge-in aborts the turn; stages that had already started still report elapsed time.
 
 ### Latency budget
 

@@ -8,7 +8,18 @@ from __future__ import annotations
 
 import pytest
 
+from machi.config import settings
+
 _LIVE = ("e2e_latency", "accent")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_baked_audio():
+    """Keep committed assets/audio off the turn path unless a test opts in."""
+    previous = settings.assets_path
+    settings.assets_path = "/assets-not-mounted"
+    yield
+    settings.assets_path = previous
 
 
 def pytest_configure(config: pytest.Config) -> None:

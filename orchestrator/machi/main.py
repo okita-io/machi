@@ -19,10 +19,18 @@ from starlette.websockets import WebSocketDisconnected
 
 from machi.clients import SpeechError, synthesize, transcribe
 from machi.config import settings
-from machi.db import init_db, record_attempt, record_session
+from machi.db import (
+    init_db,
+    list_sessions,
+    record_attempt,
+    record_debrief,
+    record_session,
+    session_progress,
+)
 from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
 from machi.llm import LlmClient, render_prompt
 from machi.nlp import build_ruby_html, to_romaji
+from machi.npc_audio import cached_npc_wav
 from machi.scenario_loader import load_all_scenarios
 from machi.session import (
     PHASE_BRIEFING,
@@ -213,6 +221,21 @@ async def synthesize_line(body: SynthesizeRequest) -> dict[str, str]:
     }
 
 
+@app.get("/sessions")
+async def list_session_rows() -> list[dict[str, Any]]:
+    """Saved sessions, including stars and completion after debrief."""
+    return list_sessions(Path(settings.db_path))
+
+
+@app.get("/sessions/{session_id}/progress")
+async def get_session_progress(session_id: str) -> dict[str, Any]:
+    """Persisted stars, completion, per-goal hint peaks, and attempts."""
+    progress = session_progress(Path(settings.db_path), session_id)
+    if progress is None:
+        raise HTTPException(status_code=404, detail="session not found")
+    return progress
+
+
 @app.get("/sessions/{session_id}/coach")
 async def session_coach(session_id: str) -> dict[str, Any]:
     """Tutor note for a turn whose NPC audio already returned."""
@@ -252,14 +275,7 @@ async def session_turn(
     for key, value in timer.header_map().items():
         response.headers[key] = value
     timer.emit(session_id=session_id, cancelled=False)
-    if result.get("learner_text"):
-        record_attempt(
-            Path(settings.db_path),
-            session_id,
-            state.node_id,
-            result["learner_text"],
-            result["goal_hits"],
-        )
+    _persist_turn(state, result)
     return result
 
 
@@ -458,7 +474,13 @@ async def _session_turn_pipeline(
             )
         try:
             with timer.measure(STAGE_TTS):
-                audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
+                cached = cached_npc_wav(settings.assets_path, state.scenario, npc_ja)
+                if cached is not None:
+                    timer.set_source(STAGE_TTS, "cache")
+                    audio = cached
+                else:
+                    timer.set_source(STAGE_TTS, "live")
+                    audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
         except SpeechError as exc:
             raise _speech_unavailable(exc) from exc
         # Let a tutor call that already finished publish before we decide.
@@ -639,6 +661,42 @@ def _pack_turn(
         payload["corrections"] = _correction_cards(state)
         payload["complete"] = scenario_complete(state)
     return payload
+
+
+def _persist_turn(state: SessionState, result: dict[str, Any]) -> None:
+    path = Path(settings.db_path)
+    utterance = result.get("learner_text")
+    if isinstance(utterance, str) and utterance:
+        coach = result.get("coach") if isinstance(result.get("coach"), dict) else {}
+        hits = result.get("goal_hits")
+        record_attempt(
+            path,
+            state.id,
+            state.node_id,
+            utterance,
+            list(hits) if isinstance(hits, list) else [],
+            hint_rung=state.hint_rung,
+            correction_ja=_optional_text(coach.get("correction_ja")),
+            correction_en=_optional_text(coach.get("correction_en")),
+        )
+    if result.get("type") == "debrief":
+        peaks = {key: int(rung) for key, rung in state.hint_peaks.items()}
+        max_rung = max([state.hint_rung, *peaks.values()])
+        record_debrief(
+            path,
+            state.id,
+            stars=int(result.get("stars") or 0),
+            completed=bool(result.get("complete")),
+            hint_peaks=peaks,
+            max_hint_rung=max_rung,
+        )
+
+
+def _optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
 
 
 def _correction_cards(state: SessionState) -> list[dict[str, str]]:

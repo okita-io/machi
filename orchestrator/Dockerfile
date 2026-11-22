@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir .
 
 ENV SCENARIOS_PATH=/scenarios
 ENV DB_PATH=/data/machi.sqlite
+ENV ASSETS_PATH=/assets
 
 EXPOSE 8100
 

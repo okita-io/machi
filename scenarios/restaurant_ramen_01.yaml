@@ -1,0 +1,136 @@
+id: restaurant_ramen_01
+title:
+  en: "Ramen shop: a table for two"
+  ja: "ラーメン屋"
+level: [1, 2, 3]
+scene:
+  background: bg/ramen_counter_day.svg
+  ambience: sfx/ramen_shop_loop.ogg
+  hotspots:
+    - rect: [812, 140, 210, 60]
+      ja: "営業中"
+      kana: "えいぎょうちゅう"
+      en: "Open for business"
+    - rect: [120, 380, 300, 220]
+      ja: "お品書き"
+      kana: "おしながき"
+      en: "Menu"
+      opens: menu_ramen
+npc:
+  id: staff_tanaka
+  role: "Ramen shop staff, early 20s, cheerful, busy lunch rush"
+  voice:
+    engine: qwen3_tts
+    speaker: Ono_Anna
+    style: "bright, quick, polite"
+  register: polite_service
+  speed:
+    1: slow
+    2: natural
+    3: natural
+    4: fast
+guide:
+  id: sora
+  voice:
+    engine: irodori
+    design: "gentle young woman, warm, slightly playful"
+goals:
+  - id: party_size
+    prompt_en: "Tell them how many people are in your party (2)."
+    accept:
+      - "ふたりです"
+      - "二人です"
+      - "ふたり"
+      - "2人お願いします"
+    slots:
+      count: 2
+  - id: order
+    prompt_en: "Order one shoyu ramen."
+    accept_intent: order_item
+    slots:
+      item: shoyu_ramen
+      qty: 1
+    accept:
+      - "醤油ラーメン"
+      - "しょうゆラーメン"
+      - "醤油ラーメンを一つ"
+      - "しょうゆラーメンをひとつ"
+      - "醤油ラーメンを一つお願いします"
+  - id: ask_water
+    prompt_en: "Ask for water."
+    optional: true
+    accept:
+      - "お水"
+      - "おみず"
+      - "水ください"
+      - "お水をください"
+  - id: pay
+    prompt_en: "Ask for the bill and pay by card."
+    slots:
+      method: card
+    accept:
+      - "お会計"
+      - "会計"
+      - "お会計お願いします"
+      - "カード"
+      - "カードで"
+      - "カードで大丈夫ですか"
+key_phrases:
+  - ja: "二人です"
+    kana: "ふたりです"
+    romaji: "futari desu"
+    en: "Two people."
+  - ja: "醤油ラーメンを一つお願いします"
+    kana: "しょうゆラーメンをひとつおねがいします"
+    romaji: "shouyu raamen o hitotsu onegaishimasu"
+    en: "One shoyu ramen, please."
+  - ja: "お水をください"
+    kana: "おみずをください"
+    romaji: "omizu o kudasai"
+    en: "Water, please."
+  - ja: "お会計お願いします"
+    kana: "おかいけいおねがいします"
+    romaji: "okaikei onegaishimasu"
+    en: "Check, please."
+  - ja: "カードで大丈夫ですか"
+    kana: "カードでだいじょうぶですか"
+    romaji: "kaado de daijoubu desu ka"
+    en: "Is card OK?"
+flow:
+  start: greet
+  nodes:
+    greet:
+      npc: "いらっしゃいませ！何名様ですか？"
+      npc_kana: "いらっしゃいませ！なんめいさまですか？"
+      expects: party_size
+      on_success: seat
+      on_other:
+        clarify: "何名様でしょうか？"
+        max_retries: 2
+    seat:
+      npc: "こちらのお席へどうぞ。ご注文がお決まりでしたらお呼びください。"
+      npc_kana: "こちらのおせきへどうぞ。ごちゅうもんがおきまりでしたらおよびください。"
+      expects: [order, ask_water]
+      on_success:
+        order: confirm_order
+        ask_water: confirm_order
+    confirm_order:
+      npc: "醤油ラーメンお一つですね。少々お待ちください。"
+      npc_kana: "しょうゆラーメンおひとつですね。しょうしょうおまちください。"
+      branch:
+        - when:
+            level_gte: 3
+          surprise: "麺の硬さはどうなさいますか？"
+      next: pay
+    pay:
+      expects: pay
+      npc_on_success: "ありがとうございました！"
+      npc_on_success_kana: "ありがとうございました！"
+      end: true
+success:
+  required: [party_size, order, pay]
+  stars:
+    3: "no hints above level default"
+    2: "one rung climbed"
+    1: "completed"
+srs_tags: [restaurant, counters, polite_requests]

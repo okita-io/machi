@@ -126,7 +126,11 @@ flow:
       expects: pay
       npc_on_success: "ありがとうございました！"
       npc_on_success_kana: "ありがとうございました！"
+      on_success: debrief
+    debrief:
+      debrief: true
       end: true
+      narration_en: "You paid and the visit is done."
 success:
   required: [party_size, order, pay]
   stars:

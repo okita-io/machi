@@ -25,6 +25,17 @@ export type SessionStart = {
   node_expects: string[];
   node_id: string;
   hint_rung: number;
+  phase?: "briefing" | "warmup" | "roleplay" | "debrief";
+  title_en?: string;
+  required_goals?: string[];
+  briefing_en?: string;
+};
+
+export type CorrectionCard = {
+  en: string;
+  ja: string;
+  romaji: string;
+  ruby_html: string;
 };
 
 export async function createSession(scenarioId: string, level = 1): Promise<SessionStart> {
@@ -61,17 +72,38 @@ export type TurnResult = {
   accepted?: boolean;
   node_expects?: string[];
   hint_max?: Record<string, number>;
+  type?: string;
+  turn_type?: string;
+  phase?: "briefing" | "warmup" | "roleplay" | "debrief";
+  reset?: boolean;
+  stars?: number;
+  goals_completed?: string[];
+  corrections?: CorrectionCard[];
+  complete?: boolean;
+  warmup_index?: number;
+  warmup_total?: number;
+  warmup_passed?: boolean | null;
+  warmup_complete?: boolean;
+  phrase?: KeyPhrase | null;
+  next_phrase?: KeyPhrase | null;
+  node_id?: string;
 };
 
 export async function sendTurn(
   sessionId: string,
   text: string,
   hintMax: Record<string, number> = {},
+  options?: { skipWarmup?: boolean; advance?: "warmup" | "briefing" | "replay" },
 ): Promise<TurnResult> {
   const r = await fetch(`${API_BASE}/sessions/${sessionId}/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, hint_max: hintMax }),
+    body: JSON.stringify({
+      text,
+      hint_max: hintMax,
+      ...(options?.skipWarmup ? { skip_warmup: true } : {}),
+      ...(options?.advance ? { advance: options.advance } : {}),
+    }),
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();

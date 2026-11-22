@@ -129,7 +129,7 @@ def test_vad_disabled_hands_free_does_not_auto_commit():
     with synth, asr, disabled, TestClient(app) as client:
         sid = _session(client)
         with client.websocket_connect(f"/ws/{sid}") as ws:
-            ws.send_json({"type": "audio_start", "hands_free": True})
+            ws.send_json({"type": "audio_start", "hands_free": True, "skip_warmup": True})
             assert ws.receive_json()["event"] == "audio_start"
             for _ in range(30):
                 ws.send_bytes(SILENCE)
@@ -166,7 +166,7 @@ def test_hands_free_fake_vad_emits_turn_result_within_budget():
     with synth, asr, injected, TestClient(app) as client:
         sid = _session(client)
         with client.websocket_connect(f"/ws/{sid}") as ws:
-            ws.send_json({"type": "audio_start", "hands_free": True})
+            ws.send_json({"type": "audio_start", "hands_free": True, "skip_warmup": True})
             assert ws.receive_json()["hands_free"] is True
             for _ in range(4 + 24):
                 ws.send_bytes(SILENCE)

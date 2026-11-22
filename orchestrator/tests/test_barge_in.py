@@ -54,13 +54,13 @@ def test_audio_start_cancels_inflight_turn_and_logs_cancelled_flag(caplog):
         assert created.status_code == 200
         sid = created.json()["session_id"]
         with client.websocket_connect(f"/ws/{sid}") as ws:
-            ws.send_json({"type": "turn", "text": "ふたりです"})
+            ws.send_json({"type": "turn", "text": "ふたりです", "skip_warmup": True})
             assert entered.wait(2)
             ws.send_json({"type": "audio_start"})
             ack = ws.receive_json()
             assert ack["type"] == "audio_ack"
             assert ack["event"] == "audio_start"
-            ws.send_json({"type": "turn", "text": "ふたりです"})
+            ws.send_json({"type": "turn", "text": "ふたりです", "skip_warmup": True})
             result = ws.receive_json()
 
     assert result["type"] == "turn_result"
@@ -99,9 +99,9 @@ def test_new_turn_cancels_inflight_turn():
         )
         sid = created.json()["session_id"]
         with client.websocket_connect(f"/ws/{sid}") as ws:
-            ws.send_json({"type": "turn", "text": "ふたりです"})
+            ws.send_json({"type": "turn", "text": "ふたりです", "skip_warmup": True})
             assert entered.wait(2)
-            ws.send_json({"type": "turn", "text": "ふたりです"})
+            ws.send_json({"type": "turn", "text": "ふたりです", "skip_warmup": True})
             result = ws.receive_json()
 
     assert result["type"] == "turn_result"

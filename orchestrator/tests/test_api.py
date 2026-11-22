@@ -31,7 +31,7 @@ def test_health_and_session_flow():
 
         turn = client.post(
             f"/sessions/{sid}/turn",
-            json={"text": "ふたりです"},
+            json={"text": "ふたりです", "skip_warmup": True},
         )
         assert turn.status_code == 200
         body = turn.json()

@@ -38,12 +38,12 @@
 ## Learner flow
 
 1. **Pick a place** — illustrated neighborhood map; buildings are scenarios
-2. **Briefing with Sora** — goal card and 3–5 key phrases with audio
-3. **Warm-up** — repeat key phrases; light pronunciation scoring
+2. **Briefing with Sora** — goal card and 3–5 key phrases with audio. A new session stays in this phase until the learner starts warm-up.
+3. **Warm-up** — repeat each key phrase once. Matching is lenient (the phrase, its reading, romaji, or English). A miss does not fail the step. Role-play goal scoring stays off until the last phrase is attempted. Clients send `skip_warmup: true` on `POST /sessions/{id}/turn` to jump straight into role-play.
 4. **Role-play** — Sora as staff; learner speaks; subtitles with furigana at hint level
 5. **Hint ladder** — silence, wrong move, or Help climbs one rung (lowers stars)
 6. **Coach timeouts** — understandable mistakes get in-character NPC reaction + coach note
-7. **Debrief** — stars, corrections, SRS deck updates, optional replay
+7. **Debrief** — after the closing node (`debrief: true` in the scenario flow), the turn returns `type: debrief` with stars, the required goals from `success.required`, and up to two tutor corrections (Japanese with furigana and romaji, plus English). SRS deck updates come later. Replay and return-to-briefing reset the same session.
 
 ### Scenarios
 
@@ -143,6 +143,8 @@ Two LLM roles per turn:
 
 - **NPC** — short in-character Japanese → TTS
 - **Tutor (Sora)** — JSON: goal hits, correction, hint rung, coach note
+
+Prompt text lives in `orchestrator/prompts/` (`npc_system.md`, `npc_user.md`, `tutor_system.md`, `tutor_user.md`, and `coach_note_*.md`). The orchestrator fills `{{placeholders}}`. Tutor JSON is validated: `goal_hits`, `correction_en`, `coach_note_en`, `hint_rung` 1–4, and `sora_expression` (`happy`, `think`, `cheer`, `surprised`, `sorry`, `point`). Optional `correction_ja` is the phrase the debrief shows with furigana. One repair retry appends the validation error; if that is still invalid, the mock tutor payload is used.
 
 Goal checks: fuzzy `accept` lists first, then LLM judgment.
 

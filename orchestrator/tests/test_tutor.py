@@ -52,7 +52,7 @@ def test_turn_echoes_hint_max_per_goal():
         assert created.json()["node_expects"] == ["party_size"]
         turn = client.post(
             f"/sessions/{sid}/turn",
-            json={"text": "nope", "hint_max": {"party_size": 3}},
+            json={"text": "nope", "hint_max": {"party_size": 3}, "skip_warmup": True},
         )
 
     assert turn.status_code == 200

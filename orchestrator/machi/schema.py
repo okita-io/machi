@@ -84,6 +84,7 @@ class FlowNode(BaseModel):
     npc_on_success: str | None = None
     npc_on_success_kana: str | None = None
     end: bool = False
+    debrief: bool = False
 
 
 class FlowSpec(BaseModel):

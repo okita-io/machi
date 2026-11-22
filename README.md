@@ -178,13 +178,15 @@ docker-compose.yml
 | ASR / TTS (CPU) | Mock / stub WAV |
 | ASR / TTS / pron (GPU) | Health stubs |
 | LLM | Live when `LLM_BASE_URL` set; else mock |
-| Lip flap, hints, debrief, FSRS | Not yet (M1/M2) |
+| Lip flap and hint ladder | In the scene |
+| Briefing, warm-up, debrief | Sora briefing, one lenient attempt per key phrase, debrief after pay |
+| FSRS | Not yet (M2) |
 
 ## Suggested next steps
 
 1. **M0** — Stream a real ASR (`asr/`) on the PCM the VAD already commits.
 2. **GPU ASR/TTS** — Implement `asr` and `tts` services with Qwen3 or Kokoro on the `cpu`/`spark` profiles.
-3. **M1** — Hint ladder UI, coach drawer, debrief screen. Furigana and the level-2 romaji row are in place.
+3. **M1** — Prompt templates and tutor JSON validation are in. Briefing, warm-up, and the debrief screen run for the ramen shop. Furigana and the level-2 romaji row are in place.
 4. **Assets** — ComfyUI bake script for WebP backgrounds and Sora expression sheet.
 
 ## License

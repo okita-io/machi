@@ -1,7 +1,7 @@
 export type AudioControl =
-  | { type: "audio_start"; hands_free: boolean }
+  | { type: "audio_start"; hands_free: boolean; hint_max?: Record<string, number> }
   | { type: "audio_stop" }
-  | { type: "turn"; text?: string };
+  | { type: "turn"; text?: string; hint_max?: Record<string, number> };
 
 export function buildSessionWsUrl(
   sessionId: string,

@@ -27,6 +27,11 @@ header h1 {
   font-size: 0.8rem;
 }
 
+.stars {
+  letter-spacing: 0.08em;
+  color: #ffd43b;
+}
+
 .level-control {
   margin-left: auto;
   display: flex;
@@ -53,12 +58,100 @@ header h1 {
   overflow: hidden;
 }
 
-.guide {
+.guide-slot {
   position: absolute;
   right: 8%;
   bottom: 0;
   height: 55%;
+  aspect-ratio: 240 / 360;
+}
+
+.guide {
+  height: 100%;
+  width: 100%;
+  display: block;
   filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.45));
+}
+
+.mouth {
+  position: absolute;
+  left: 42%;
+  top: 31%;
+  width: 16%;
+  height: 1.6%;
+  background: #c55;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.mouth.open {
+  top: 29%;
+  height: 7%;
+  border-radius: 50%;
+  background: #5a1a1a;
+}
+
+.expression {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  transform: translate(-50%, -10%);
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+}
+
+.hint-card {
+  position: absolute;
+  left: 1rem;
+  top: 1rem;
+  max-width: min(420px, 70%);
+  background: rgba(0, 0, 0, 0.72);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+}
+
+.hint-kicker {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.hint-prompt,
+.hint-line {
+  margin: 0.35rem 0 0;
+}
+
+.hint-line {
+  font-size: 1.15rem;
+}
+
+.hint-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.hint-actions button {
+  padding: 0.35rem 0.75rem;
+  border: none;
+  border-radius: 6px;
+  background: #5c7cfa;
+  color: #fff;
+}
+
+.hint-actions button:disabled {
+  opacity: 0.5;
+}
+
+.hint-error {
+  margin: 0.4rem 0 0;
+  color: #ffc9c9;
+  font-size: 0.8rem;
 }
 
 .subtitle {
@@ -109,6 +202,21 @@ header h1 {
 .coach h2 {
   margin-top: 0;
   font-size: 1rem;
+}
+
+.expression-id {
+  margin: 0 0 0.5rem;
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: #3d5a80;
+  font-size: 0.8rem;
+}
+
+.correction {
+  background: #2a2418;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
 }
 
 .coach ul {

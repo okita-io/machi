@@ -28,7 +28,7 @@ Open [http://localhost:5173](http://localhost:5173).
 
 1. The ramen shop scene loads with a placeholder background and Sora sprite.
 2. Type what you would say (e.g. `ふたりです`) and **Send turn**.
-3. The orchestrator runs the scenario state machine, enriches the NPC line with romaji/ruby, calls the stub TTS, and shows coach notes.
+3. The orchestrator runs the scenario state machine, enriches the NPC line with romaji/ruby, calls the stub TTS, and shows coach notes when the tutor JSON is ready (NPC audio is not held for that note). Help, a wrong line, or ~45s of silence climbs the hint rung. Sora's mouth opens with the playback loudness.
 
 Scene art is served at [http://localhost:8080](http://localhost:8080).
 

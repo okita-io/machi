@@ -1,7 +1,17 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { playNpcAudio } from "./audio/playback";
 import { useMic } from "./audio/useMic";
-import { createSession, sendTurn, type NpcLine, type SessionStart, type TurnResult } from "./api";
+import {
+  createSession,
+  fetchCoach,
+  sendTurn,
+  synthesizeSpeech,
+  type CoachPayload,
+  type NpcLine,
+  type SessionStart,
+  type TurnResult,
+} from "./api";
+import { expressionFromCoach, type SoraExpression } from "./coach";
 import {
   DEFAULT_HINT_LEVEL,
   HINT_LEVELS,
@@ -10,6 +20,17 @@ import {
   type HintLevel,
   type SpokenRole,
 } from "./hintLevel";
+import {
+  HINT_TIMEOUT_MS,
+  createHintLadder,
+  hintView,
+  nextGoalId,
+  reduceHintLadder,
+  rungFor,
+  starsForLadder,
+  type HintLadderState,
+} from "./hintLadder";
+import type { MouthFrame } from "./mouth";
 import "./App.css";
 
 function SubtitleLine({
@@ -33,26 +54,63 @@ function SubtitleLine({
   );
 }
 
+function starGlyphs(count: number): string {
+  return "★".repeat(count) + "☆".repeat(Math.max(0, 3 - count));
+}
+
 export default function App() {
   const [level, setLevel] = useState<HintLevel>(DEFAULT_HINT_LEVEL);
   const [session, setSession] = useState<SessionStart | null>(null);
   const [npc, setNpc] = useState<NpcLine | null>(null);
   const [learner, setLearner] = useState<NpcLine | null>(null);
-  const [coach, setCoach] = useState("");
+  const [coach, setCoach] = useState<CoachPayload | null>(null);
+  const [coachPending, setCoachPending] = useState(false);
   const [input, setInput] = useState("ふたりです");
   const [busy, setBusy] = useState(false);
   const [goals, setGoals] = useState<string[]>([]);
   const [handsFree, setHandsFree] = useState(false);
+  const [ladder, setLadder] = useState<HintLadderState | null>(null);
+  const [hintEpoch, setHintEpoch] = useState(0);
+  const [mouth, setMouth] = useState<MouthFrame>("closed");
+  const [hearing, setHearing] = useState(false);
+  const [hintError, setHintError] = useState<string | null>(null);
+  const hintMaxRef = useRef<Record<string, number>>({});
+  const sessionIdRef = useRef<string | null>(null);
 
-  const applyTurn = useCallback((result: TurnResult) => {
-    setLearner(result.learner);
-    setNpc(result.npc);
-    setCoach(result.coach.coach_note_en);
-    setGoals(result.completed_goals);
-    playNpcAudio(result.tts_audio_b64);
+  hintMaxRef.current = ladder?.hintMax ?? {};
+  sessionIdRef.current = session?.session_id ?? null;
+
+  const onMouth = useCallback((frame: MouthFrame) => {
+    setMouth((prev) => (prev === frame ? prev : frame));
   }, []);
 
-  const mic = useMic(session?.session_id ?? null, handsFree, applyTurn);
+  const applyTurn = useCallback(
+    (result: TurnResult) => {
+      // Start NPC audio before coach state. A pending note must not delay playback.
+      if (result.tts_audio_b64) playNpcAudio(result.tts_audio_b64, onMouth);
+      setLearner(result.learner);
+      setNpc(result.npc);
+      setGoals(result.completed_goals);
+      setHintEpoch((n) => n + 1);
+      setLadder((prev) => {
+        if (!prev) return prev;
+        const completed = result.completed_goals ?? [];
+        const goalId = nextGoalId(result.node_expects, completed);
+        const accepted = result.accepted ?? (result.goal_hits?.length ?? 0) > 0;
+        if (accepted) return reduceHintLadder(prev, { type: "accepted", nextGoalId: goalId });
+        return reduceHintLadder(prev, { type: "wrong" });
+      });
+      if (result.coach_pending) {
+        setCoachPending(true);
+      } else {
+        setCoachPending(false);
+        setCoach(result.coach);
+      }
+    },
+    [onMouth],
+  );
+
+  const mic = useMic(session?.session_id ?? null, handsFree, applyTurn, hintMaxRef);
 
   useEffect(() => {
     let cancel = false;
@@ -63,33 +121,103 @@ export default function App() {
       setNpc(s.opening_npc);
       setLearner(null);
       setGoals([]);
-      setCoach("");
+      setCoach(null);
+      setCoachPending(false);
+      setMouth("closed");
+      setLadder(createHintLadder(level, s.node_expects?.[0] ?? ""));
+      setHintEpoch(0);
     })();
     return () => {
       cancel = true;
     };
   }, [level]);
 
+  const rung = ladder ? rungFor(ladder) : 1;
+  const goalId = ladder?.goalId ?? "";
+
+  useEffect(() => {
+    if (!goalId) return;
+    const timer = window.setTimeout(() => {
+      setLadder((prev) => (prev ? reduceHintLadder(prev, { type: "timeout" }) : prev));
+    }, HINT_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [goalId, rung, hintEpoch]);
+
+  useEffect(() => {
+    if (!coachPending) return;
+    const sessionId = sessionIdRef.current;
+    if (!sessionId) return;
+    let cancel = false;
+    const tick = async () => {
+      try {
+        const body = await fetchCoach(sessionId);
+        if (cancel || body.pending) return;
+        if (body.coach) {
+          setCoach(body.coach);
+          setCoachPending(false);
+        }
+      } catch {
+        // Keep polling. NPC audio is already playing.
+      }
+    };
+    const id = window.setInterval(() => void tick(), 400);
+    void tick();
+    return () => {
+      cancel = true;
+      window.clearInterval(id);
+    };
+  }, [coachPending]);
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!session || busy || mic.sending) return;
     setBusy(true);
     try {
-      applyTurn(await sendTurn(session.session_id, input));
+      applyTurn(await sendTurn(session.session_id, input, hintMaxRef.current));
     } finally {
       setBusy(false);
     }
   }
 
-  if (!session) {
+  function onHelp() {
+    setLadder((prev) => (prev ? reduceHintLadder(prev, { type: "help" }) : prev));
+    setHintEpoch((n) => n + 1);
+  }
+
+  async function onHear(text: string) {
+    setHearing(true);
+    setHintError(null);
+    try {
+      const wav = await synthesizeSpeech(text);
+      playNpcAudio(wav, onMouth);
+    } catch {
+      setHintError("Couldn't play that line.");
+    } finally {
+      setHearing(false);
+    }
+  }
+
+  if (!session || !ladder) {
     return <div className="loading">Loading Machi…</div>;
   }
+
+  const goal = session.goals.find((item) => item.id === goalId) ?? null;
+  const view = hintView(goal, session.key_phrases, rung);
+  const stars = starsForLadder(ladder, session.stars);
+  const expression: SoraExpression = coachPending
+    ? "think"
+    : coach
+      ? expressionFromCoach(coach)
+      : "happy";
 
   return (
     <div className="app">
       <header>
         <h1>Machi</h1>
         <span className="badge">CPU demo</span>
+        <span className="stars" title={stars.rule}>
+          {starGlyphs(stars.stars)}
+        </span>
         <label className="level-control">
           Level
           <select
@@ -106,7 +234,42 @@ export default function App() {
         </label>
       </header>
       <main className="stage" style={{ backgroundImage: `url(${session.scene.background})` }}>
-        <img className="guide" src={session.scene.guide_sprite} alt="Sora" />
+        <div className="guide-slot">
+          <img
+            className="guide"
+            src={session.scene.guide_sprite}
+            alt="Sora"
+            data-expression={expression}
+          />
+          <span className={`mouth ${mouth}`} data-mouth={mouth} aria-hidden="true" />
+          <span className="expression" data-expression={expression}>
+            {expression}
+          </span>
+        </div>
+        <div className="hint-card">
+          <p className="hint-kicker">
+            {goal ? `Goal · rung ${view.rung}` : "Listen"}
+          </p>
+          {view.mode === "goal" || !view.text ? (
+            <p className="hint-prompt">{view.promptEn || "Follow the staff."}</p>
+          ) : (
+            <>
+              <p className="hint-prompt">{view.promptEn}</p>
+              <p className="hint-line">{view.text}</p>
+            </>
+          )}
+          <div className="hint-actions">
+            {view.hearText ? (
+              <button type="button" disabled={hearing} onClick={() => void onHear(view.hearText!)}>
+                {hearing ? "…" : "Hear it"}
+              </button>
+            ) : null}
+            <button type="button" onClick={onHelp} disabled={!goalId || rung >= 4}>
+              Help
+            </button>
+          </div>
+          {hintError ? <p className="hint-error">{hintError}</p> : null}
+        </div>
         {npc && (
           <div className="subtitle">
             {learner && <SubtitleLine role="learner" label="You" line={learner} level={level} />}
@@ -114,9 +277,27 @@ export default function App() {
           </div>
         )}
       </main>
-      <aside className="coach">
+      <aside className="coach" aria-live="polite">
         <h2>Sora · coach</h2>
-        <p>{coach || "Try the key phrases below. Type what you would say."}</p>
+        <p className="expression-id" data-expression={expression}>
+          {expression}
+        </p>
+        <p>
+          {coachPending
+            ? "Sora is writing a note — the line already started."
+            : coach?.coach_note_en || "Try the key phrases below. Type what you would say."}
+        </p>
+        {coach?.correction ? (
+          <p className="correction">
+            Try: <strong>{coach.correction}</strong>
+          </p>
+        ) : null}
+        {coach?.goal_hits?.length ? (
+          <p className="goals">Hits: {coach.goal_hits.join(", ")}</p>
+        ) : null}
+        {typeof coach?.hint_rung === "number" ? (
+          <p className="goals">Tutor rung: {coach.hint_rung}</p>
+        ) : null}
         <ul>
           {session.key_phrases.map((kp) => (
             <li key={kp.ja}>

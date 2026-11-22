@@ -159,10 +159,10 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | --- | --- | --- | --- | --- |
 | M1-01 | [x] | **fugashi** + unidic-lite furigana for any NPC line | S0-03 | `nlp.py` token ruby; not only `npc_kana` from YAML; MIT/BSD deps |
 | M1-02 | [x] | **cutlet** romaji on all displayed Japanese (optional extra or default in Docker) | M1-01 | NPC + learner lines show romaji row when hint ≥ 2 |
-| M1-03 | [ ] | Hint ladder UI (EN → romaji → kana → none) + Help button | S0-07 | Rung climb on timeout/wrong/help; stars logic stub wired to `success.stars` |
-| M1-04 | [ ] | Coach side panel (Sora out-of-role); never block NPC audio | S0-05 | Tutor JSON populates coach; parallel LLM call pattern from spec |
+| M1-03 | [x] | Hint ladder UI (EN → romaji → kana → none) + Help button | S0-07 | Rung climb on timeout/wrong/help; stars logic stub wired to `success.stars` |
+| M1-04 | [x] | Coach side panel (Sora out-of-role); never block NPC audio | S0-05 | Tutor JSON populates coach; parallel LLM call pattern from spec |
 | M1-05 | [ ] | **Irodori-TTS v4.1 Small** for Sora (`guide` voice in YAML) | M0-10 | Distinct voice id for guide vs NPC |
-| M1-06 | [ ] | Lip flap via Web Audio analyser on TTS output | S0-07, M0-10 | Mouth sprite cycles with loudness |
+| M1-06 | [x] | Lip flap via Web Audio analyser on TTS output | S0-07, M0-10 | Mouth sprite cycles with loudness |
 | M1-07 | [ ] | Pre-baked WebP background + sprite sheet for ramen (`assets/`) | — | Replace SVG placeholders; `scene.background` paths in YAML |
 | M1-08 | [ ] | Scenario flow: debrief node (stars, goals, two corrections) | S0-03 | UI screen after `pay.end`; required goals from `success.required` |
 | M1-09 | [ ] | Briefing + warm-up steps before role-play | S0-02 | Key phrases with tap-to-hear (TTS) |
@@ -275,4 +275,4 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 | INFRA | 5 | 0 |
 | **Total** | **63** | **10** |
 
-_Last updated with M1-01 (fugashi furigana) and M1-02 (cutlet romaji at hint level ≥ 2). Scaffold baseline remains PR #1._
+_Last updated with M1-03 (hint ladder), M1-04 (coach drawer), and M1-06 (lip flap). Scaffold baseline remains PR #1._

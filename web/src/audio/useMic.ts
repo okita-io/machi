@@ -21,6 +21,7 @@ export function useMic(
   sessionId: string | null,
   handsFree: boolean,
   onTurn: (result: TurnResult) => void,
+  hintMaxRef?: { current: Record<string, number> },
 ) {
   const [recording, setRecording] = useState(false);
   const [sending, setSending] = useState(false);
@@ -103,7 +104,13 @@ export function useMic(
           await capture.stop();
           return;
         }
-        ws.send(encodeControl({ type: "audio_start", hands_free: handsFreeRef.current }));
+        ws.send(
+          encodeControl({
+            type: "audio_start",
+            hands_free: handsFreeRef.current,
+            hint_max: hintMaxRef?.current ?? {},
+          }),
+        );
         sentStartRef.current = true;
         capture.connect((frame) => {
           if (ws.readyState === WebSocket.OPEN) ws.send(frame);
@@ -137,7 +144,7 @@ export function useMic(
       }
       setSending(true);
       ws.send(encodeControl({ type: "audio_stop" }));
-      ws.send(encodeControl({ type: "turn" }));
+      ws.send(encodeControl({ type: "turn", hint_max: hintMaxRef?.current ?? {} }));
     });
   }
 

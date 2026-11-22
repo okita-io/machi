@@ -110,13 +110,58 @@ def npc_line_for_node(state: SessionState, *, success: bool) -> tuple[str, str |
     return node.npc or "", node.npc_kana
 
 
+SORA_EXPRESSIONS = frozenset({"happy", "think", "cheer", "surprised", "sorry", "point"})
+
+# Coach-note sentiment (and a few aliases) → Sora's expression id.
+_SENTIMENT_EXPRESSION = {
+    "happy": "happy",
+    "positive": "happy",
+    "glad": "happy",
+    "cheer": "cheer",
+    "celebrate": "cheer",
+    "success": "cheer",
+    "think": "think",
+    "thinking": "think",
+    "encourage": "think",
+    "neutral": "think",
+    "surprised": "surprised",
+    "surprise": "surprised",
+    "sorry": "sorry",
+    "negative": "sorry",
+    "apologetic": "sorry",
+    "point": "point",
+    "correction": "point",
+    "correct": "point",
+}
+
+
+def expression_from_tutor(payload: dict[str, Any]) -> str:
+    """Pick a Sora expression from explicit id, then coach-note sentiment."""
+    explicit = payload.get("sora_expression")
+    if isinstance(explicit, str) and explicit in SORA_EXPRESSIONS:
+        return explicit
+    for key in ("sentiment", "coach_note_sentiment"):
+        sentiment = payload.get(key)
+        if isinstance(sentiment, str) and sentiment in _SENTIMENT_EXPRESSION:
+            return _SENTIMENT_EXPRESSION[sentiment]
+    if payload.get("correction"):
+        return "point"
+    hits = payload.get("goal_hits")
+    if isinstance(hits, list) and hits:
+        return "cheer"
+    if payload.get("understandable") is False:
+        return "sorry"
+    return "think"
+
+
 def default_tutor_payload(
     goal_hits: list[str],
     *,
     coach_note: str,
     hint_rung: int,
 ) -> dict[str, Any]:
-    return {
+    sentiment = "success" if goal_hits else "encourage"
+    payload: dict[str, Any] = {
         "goal_hits": goal_hits,
         "slots": {},
         "understandable": bool(goal_hits),
@@ -125,7 +170,34 @@ def default_tutor_payload(
         "hint_rung": hint_rung,
         "step_out": False,
         "coach_note_en": coach_note,
+        "sentiment": sentiment,
+        "coach_note_sentiment": sentiment,
     }
+    payload["sora_expression"] = expression_from_tutor(payload)
+    return payload
+
+
+def normalize_tutor_payload(
+    raw: dict[str, Any] | None,
+    *,
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge model JSON onto the mock payload and fill sora_expression."""
+    source = raw if isinstance(raw, dict) else {}
+    merged = dict(fallback)
+    for key, value in source.items():
+        if value is None and key not in ("correction", "pronunciation_tip_en"):
+            continue
+        merged[key] = value
+    sentiment = merged.get("sentiment") or merged.get("coach_note_sentiment")
+    if not isinstance(sentiment, str) or not sentiment:
+        sentiment = "success" if merged.get("goal_hits") else "encourage"
+    merged["sentiment"] = sentiment
+    merged["coach_note_sentiment"] = sentiment
+    if "sora_expression" not in source:
+        merged.pop("sora_expression", None)
+    merged["sora_expression"] = expression_from_tutor(merged)
+    return merged
 
 
 def new_session(scenario: ScenarioSpec, level: int = 1) -> SessionState:

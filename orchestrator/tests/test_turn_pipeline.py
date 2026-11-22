@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -110,6 +112,9 @@ def test_audio_b64_only_turn_runs_asr_llm_tts(monkeypatch):
     assert body["npc"]["romaji"]
     assert body["tts_audio_b64"] == base64.b64encode(WAV).decode("ascii")
     assert body["coach"]["coach_note_en"] == "Nice!"
+    assert body["coach"]["sora_expression"] == "cheer"
+    assert body["coach"]["sentiment"] == "success"
+    assert body["coach_pending"] is False
 
     assert float(turn.headers["x-latency-asr"]) >= 0
     assert float(turn.headers["x-latency-llm"]) >= 0
@@ -222,3 +227,41 @@ def test_ws_invalid_audio_b64_reports_detail():
             result = ws.receive_json()
 
     assert result == {"type": "error", "detail": "invalid audio_b64"}
+
+
+def test_slow_tutor_does_not_block_npc_audio(monkeypatch):
+    """TTS returns while the tutor call is still running."""
+
+    async def slow_tutor(**kwargs):
+        del kwargs
+        await asyncio.sleep(30)
+        return {"coach_note_en": "later", "sentiment": "sorry", "sora_expression": "sorry"}
+
+    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+        del text, voice
+        return b"RIFF"
+
+    monkeypatch.setattr(LLM, "tutor_json", slow_tutor)
+    monkeypatch.setattr("machi.main.synthesize", fake_synthesize)
+
+    from machi.main import PENDING_COACH
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/sessions",
+            json={"scenario_id": "restaurant_ramen_01", "level": 1},
+        )
+        sid = created.json()["session_id"]
+        started = time.perf_counter()
+        turn = client.post(f"/sessions/{sid}/turn", json={"text": "ふたりです"})
+        elapsed = time.perf_counter() - started
+        task = PENDING_COACH.get(sid)
+        if task is not None and not task.done():
+            task.cancel()
+
+    assert turn.status_code == 200
+    body = turn.json()
+    assert elapsed < 2
+    assert body["coach_pending"] is True
+    assert body["tts_audio_b64"]
+    assert body["npc"]["ja"]

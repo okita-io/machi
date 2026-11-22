@@ -23,7 +23,17 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/audio/**/*.{ts,tsx}", "src/hintLevel.ts", "src/hintLevel.test.ts"],
+    files: [
+      "src/audio/**/*.{ts,tsx}",
+      "src/hintLevel.ts",
+      "src/hintLevel.test.ts",
+      "src/hintLadder.ts",
+      "src/hintLadder.test.ts",
+      "src/mouth.ts",
+      "src/mouth.test.ts",
+      "src/coach.ts",
+      "src/coach.test.ts",
+    ],
     rules: {
       "react-refresh/only-export-components": "off",
     },

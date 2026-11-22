@@ -67,6 +67,12 @@
 
 Hint rungs: (1) English what to say, (2) Romaji, (3) Kana + tap-to-hear, (4) goal card only.
 
+Each goal starts at the learner's level default (level 1 → rung 1 … level 4 → rung 4). Help, about 45 seconds without an accepted attempt, or a wrong move climbs one rung, capped at 4. Stars follow `success.stars`: 3 when the rung stays at the level default, 2 after one climb above that default, 1 after further climbs. The browser keeps `hint_max` per goal and sends it on each turn.
+
+NPC synthesis and the tutor call run concurrently. The browser starts NPC playback as soon as the turn payload arrives. When the tutor is still running, the payload sets `coach_pending` and the coach drawer fills from `GET /sessions/{id}/coach` without holding the NPC line. Sora's expression is `happy`, `think`, `cheer`, `surprised`, `sorry`, or `point` (`sora_expression`, chosen from coach-note sentiment when the model omits it).
+
+Lip flap reads the playing clip with an `AnalyserNode`. Silence keeps the mouth closed; a louder frame opens it. Tap-to-hear posts the phrase to `POST /v1/synthesize` on the orchestrator, which calls the TTS stub.
+
 ## Architecture
 
 ```mermaid

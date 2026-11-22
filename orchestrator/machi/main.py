@@ -28,7 +28,9 @@ from machi.session import (
     advance_node,
     default_tutor_payload,
     evaluate_turn,
+    expected_goals,
     new_session,
+    normalize_tutor_payload,
 )
 from machi.turn_taking import (
     TurnDecision,
@@ -56,6 +58,14 @@ class _InFlightTurn:
 # Barge-in cancels the task in this map. A newer audio_start or turn bumps
 # generation so a task that already finished its awaits still drops its result.
 IN_FLIGHT: dict[str, _InFlightTurn] = {}
+
+# Tutor JSON finishes after NPC audio is ready. Generation drops a stale note
+# when barge-in or a newer turn supersedes the in-flight tutor call.
+PENDING_COACH: dict[str, asyncio.Task[dict[str, Any]]] = {}
+LAST_COACH: dict[str, dict[str, Any]] = {}
+COACH_GEN: dict[str, int] = {}
+# Latest per-goal rungs from audio_start, used when a hands-free cut ends the turn.
+HINT_SNAPSHOT: dict[str, dict[str, int]] = {}
 
 
 class _WsSink:
@@ -98,6 +108,12 @@ class CreateSessionRequest(BaseModel):
 class TurnRequest(BaseModel):
     text: str | None = None
     audio_b64: str | None = None
+    hint_max: dict[str, int] = Field(default_factory=dict)
+
+
+class SynthesizeRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=400)
+    voice: str = "guide"
 
 
 @app.get("/health")
@@ -147,8 +163,50 @@ async def create_session(body: CreateSessionRequest) -> dict[str, Any]:
         "opening_npc": enrich_line(npc_ja, npc_kana),
         "briefing_en": spec.goals[0].prompt_en if spec.goals else "",
         "key_phrases": [kp.model_dump() for kp in spec.key_phrases],
+        "goals": [
+            {
+                "id": goal.id,
+                "prompt_en": goal.prompt_en,
+                "accept": list(goal.accept),
+                "optional": goal.optional,
+            }
+            for goal in spec.goals
+        ],
+        "stars": {str(k): v for k, v in spec.success.stars.items()},
+        "node_expects": expected_goals(node),
         "hint_rung": state.hint_rung,
     }
+
+
+@app.post("/v1/synthesize")
+async def synthesize_line(body: SynthesizeRequest) -> dict[str, str]:
+    """Browser tap-to-hear. Proxies the configured TTS stub (``POST /v1/synthesize``)."""
+    try:
+        audio = await synthesize(body.text, voice=body.voice)
+    except SpeechError as exc:
+        raise _speech_unavailable(exc) from exc
+    return {
+        "text": body.text,
+        "voice": body.voice,
+        "audio_b64": base64.b64encode(audio).decode("ascii"),
+        "format": "wav",
+    }
+
+
+@app.get("/sessions/{session_id}/coach")
+async def session_coach(session_id: str) -> dict[str, Any]:
+    """Tutor note for a turn whose NPC audio already returned."""
+    if session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail="session not found")
+    task = PENDING_COACH.get(session_id)
+    if task is not None and not task.done():
+        return {"pending": True}
+    coach = LAST_COACH.get(session_id)
+    if coach is None and task is not None and task.done() and not task.cancelled():
+        exc = task.exception()
+        if exc is None:
+            coach = task.result()
+    return {"pending": False, "coach": coach}
 
 
 @app.post("/sessions/{session_id}/turn")
@@ -207,6 +265,8 @@ async def _session_turn_pipeline(
 
     prev_node_id = state.node_id
     goal_hits, success = evaluate_turn(state, utterance)
+    if body.hint_max:
+        state.hint_rung = max(state.hint_rung, max(body.hint_max.values()))
 
     if success:
         advance_node(state, goal_hits, progressed=True)
@@ -226,35 +286,117 @@ async def _session_turn_pipeline(
     scripted_ja = npc_ja
     npc_system = f"You are {state.scenario.npc.role}. Speak only Japanese, one short line."
     npc_user = f"Learner said: {utterance}. Respond in character."
-    coach = default_tutor_payload(
+    coach_fallback = default_tutor_payload(
         goal_hits,
         coach_note="Good try! Match a key phrase from the briefing." if not success else "Nice!",
         hint_rung=state.hint_rung,
     )
-    tutor_system = "You are Sora the tutor. Return JSON with goal_hits, coach_note_en, hint_rung."
+    tutor_system = (
+        "You are Sora the tutor. Return JSON with goal_hits, correction, "
+        "coach_note_en, hint_rung, sentiment, sora_expression."
+    )
     tutor_user = f"Utterance: {utterance}; hits: {goal_hits}"
-    with timer.measure(STAGE_LLM):
-        npc_ja = await LLM.npc_reply(system=npc_system, user=npc_user, fallback_line=scripted_ja)
-        coach = await LLM.tutor_json(system=tutor_system, user=tutor_user, fallback=coach)
-
+    # Tutor overlaps NPC LLM and TTS. Playback must not wait on the coach note.
+    coach_gen = _begin_coach(state.id)
+    tutor_task = asyncio.create_task(
+        _tutor_payload(tutor_system, tutor_user, coach_fallback),
+        name=f"machi-tutor-{state.id}",
+    )
     try:
-        with timer.measure(STAGE_TTS):
-            audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
-    except SpeechError as exc:
-        raise _speech_unavailable(exc) from exc
+        with timer.measure(STAGE_LLM):
+            npc_ja = await LLM.npc_reply(
+                system=npc_system, user=npc_user, fallback_line=scripted_ja
+            )
+        try:
+            with timer.measure(STAGE_TTS):
+                audio = await synthesize(npc_ja, voice=state.scenario.npc.voice.engine)
+        except SpeechError as exc:
+            raise _speech_unavailable(exc) from exc
+        # Let a tutor call that already finished publish before we decide.
+        # A still-running tutor stays pending so this response can carry audio.
+        await asyncio.sleep(0)
+        coach, coach_pending = _take_coach(state.id, coach_gen, tutor_task, coach_fallback)
+    except asyncio.CancelledError:
+        _cancel_coach_task(tutor_task)
+        raise
+    except Exception:
+        _cancel_coach_task(tutor_task)
+        raise
 
+    node_now = state.scenario.flow.nodes[state.node_id]
     return {
         "session_id": state.id,
         "node_id": state.node_id,
         "learner_text": utterance,
         "learner": enrich_line(utterance, None),
         "goal_hits": goal_hits,
+        "accepted": success,
+        "node_expects": expected_goals(node_now),
+        "hint_max": body.hint_max,
         # npc_kana matches the scripted line only. A live rewrite gets token ruby.
         "npc": enrich_line(npc_ja, npc_kana if npc_ja == scripted_ja else None),
         "coach": coach,
+        "coach_pending": coach_pending,
         "tts_audio_b64": base64.b64encode(audio).decode("ascii"),
         "completed_goals": sorted(state.completed_goals),
     }
+
+
+async def _tutor_payload(system: str, user: str, fallback: dict[str, Any]) -> dict[str, Any]:
+    raw = await LLM.tutor_json(system=system, user=user, fallback=fallback)
+    return normalize_tutor_payload(raw, fallback=fallback)
+
+
+def _begin_coach(session_id: str) -> int:
+    gen = COACH_GEN.get(session_id, 0) + 1
+    COACH_GEN[session_id] = gen
+    previous = PENDING_COACH.pop(session_id, None)
+    if previous is not None and not previous.done():
+        previous.cancel()
+    return gen
+
+
+def _cancel_coach_task(task: asyncio.Task[dict[str, Any]]) -> None:
+    if task.done():
+        _retrieve_task_error(task)
+        return
+    task.add_done_callback(_retrieve_task_error)
+    task.cancel()
+
+
+def _retrieve_task_error(task: asyncio.Task[dict[str, Any]]) -> None:
+    if task.cancelled():
+        return
+    task.exception()
+
+
+def _take_coach(
+    session_id: str,
+    gen: int,
+    task: asyncio.Task[dict[str, Any]],
+    fallback: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Return the tutor payload. Pending means NPC audio ships without waiting."""
+
+    def _publish(finished: asyncio.Task[dict[str, Any]]) -> None:
+        if COACH_GEN.get(session_id) != gen or finished.cancelled():
+            return
+        if finished.exception() is not None:
+            return
+        LAST_COACH[session_id] = finished.result()
+
+    task.add_done_callback(_publish)
+    if COACH_GEN.get(session_id) != gen:
+        return fallback, False
+    if not task.done():
+        PENDING_COACH[session_id] = task
+        return fallback, True
+    PENDING_COACH.pop(session_id, None)
+    if task.cancelled() or task.exception() is not None:
+        return fallback, False
+    coach = task.result()
+    LAST_COACH[session_id] = coach
+    return coach, False
 
 
 def _snapshot_flow(state: SessionState) -> tuple[str, set[str], int, int]:
@@ -321,12 +463,13 @@ async def _schedule_ws_turn(
     session_id: str,
     text: str | None,
     audio_b64: str | None,
+    hint_max: dict[str, int] | None = None,
 ) -> None:
     await _cancel_inflight(session_id)
     slot = _in_flight(session_id)
     generation = slot.generation
     task = asyncio.create_task(
-        _deliver_ws_turn(sink, session_id, generation, text, audio_b64),
+        _deliver_ws_turn(sink, session_id, generation, text, audio_b64, hint_max or {}),
         name=f"machi-turn-{session_id}",
     )
     slot.task = task
@@ -338,11 +481,12 @@ async def _deliver_ws_turn(
     generation: int,
     text: str | None,
     audio_b64: str | None,
+    hint_max: dict[str, int] | None = None,
 ) -> None:
     try:
         result = await session_turn(
             session_id,
-            TurnRequest(text=text, audio_b64=audio_b64),
+            TurnRequest(text=text, audio_b64=audio_b64, hint_max=hint_max or {}),
             Response(),
         )
     except asyncio.CancelledError:
@@ -415,6 +559,7 @@ async def _ws_turn(
     if text == "":
         text = None
     audio_b64 = data.get("audio_b64") if isinstance(data.get("audio_b64"), str) else None
+    hint_max = _parse_hint_max(data.get("hint_max")) or HINT_SNAPSHOT.get(session_id, {})
     # Typed text keeps the existing turn path. Otherwise use this socket's PCM.
     if text:
         buf.clear()
@@ -423,7 +568,17 @@ async def _ws_turn(
         buf.clear()
     else:
         audio_b64 = buf.take_b64()
-    await _schedule_ws_turn(sink, session_id, text, audio_b64)
+    await _schedule_ws_turn(sink, session_id, text, audio_b64, hint_max)
+
+
+def _parse_hint_max(raw: object) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+    parsed: dict[str, int] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool):
+            parsed[key] = value
+    return parsed
 
 
 async def _ws_control(
@@ -444,6 +599,9 @@ async def _ws_control(
     kind = data.get("type")
     if kind == "audio_start":
         # New speech supersedes an NPC line still being generated.
+        hinted = _parse_hint_max(data.get("hint_max"))
+        if hinted:
+            HINT_SNAPSHOT[session_id] = hinted
         await _cancel_inflight(session_id)
         buf.start(hands_free=_ws_bool(data.get("hands_free")))
         if hands_free_turn_taking(buf.hands_free, gate):

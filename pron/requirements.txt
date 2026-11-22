@@ -1,0 +1,9 @@
+# CPU pronunciation service. No torch.
+# pyopenjtalk: MIT. OpenJTalk + naist dictionary: Modified BSD.
+# librosa: ISC. numpy / scipy / numba: BSD.
+# pyopenjtalk-plus is not used; see reading.py.
+fastapi>=0.115.0
+uvicorn>=0.32.0
+pyopenjtalk>=0.3.4
+librosa>=0.10.2
+numpy>=1.26

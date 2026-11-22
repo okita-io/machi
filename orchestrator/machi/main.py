@@ -17,7 +17,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketDisconnected
 
-from machi.clients import SpeechError, synthesize, transcribe
+from machi.clients import (
+    SpeechError,
+    format_expected_reading,
+    pron_reading,
+    pron_score,
+    synthesize,
+    transcribe,
+)
 from machi.config import settings
 from machi.db import (
     init_db,
@@ -42,6 +49,7 @@ from machi.session import (
     advance_node,
     apply_warmup_attempt,
     begin_warmup,
+    coaching_phrase,
     default_tutor_payload,
     evaluate_turn,
     expected_goals,
@@ -448,6 +456,8 @@ async def _session_turn_pipeline(
     expected_ids = expected_goals(state.scenario.flow.nodes[prev_node_id])
     goal_hits, success = evaluate_turn(state, utterance)
     note_hint_peaks(state, body.hint_max)
+    phrase = coaching_phrase(state, prev_node_id, utterance)
+    score_task = _start_pitch_score(body, phrase)
 
     if success:
         advance_node(state, goal_hits, progressed=True)
@@ -469,20 +479,27 @@ async def _session_turn_pipeline(
         hint_rung=state.hint_rung,
     )
     tutor_system = render_prompt("tutor_system.md", {})
-    tutor_user = render_prompt(
-        "tutor_user.md",
-        {
-            "utterance": utterance,
-            "goal_hits": ", ".join(goal_hits),
-            "expected_goals": ", ".join(expected_ids),
-            "hint_rung": state.hint_rung,
-            "accepted": str(success).lower(),
-        },
-    )
+    tutor_values = {
+        "utterance": utterance,
+        "goal_hits": ", ".join(goal_hits),
+        "expected_goals": ", ".join(expected_ids),
+        "hint_rung": state.hint_rung,
+        "accepted": str(success).lower(),
+    }
+
+    async def _tutor_with_reading() -> dict[str, Any]:
+        reading = await pron_reading(phrase)
+        user = render_prompt(
+            "tutor_user.md",
+            {**tutor_values, "expected_reading": format_expected_reading(reading)},
+        )
+        return await _tutor_payload(tutor_system, user, coach_fallback)
+
     # Tutor overlaps NPC LLM and TTS. Playback must not wait on the coach note.
+    # The pitch advisory overlaps too and is dropped if pronunciation is down.
     coach_gen = _begin_coach(state.id)
     tutor_task = asyncio.create_task(
-        _tutor_payload(tutor_system, tutor_user, coach_fallback),
+        _tutor_with_reading(),
         name=f"machi-tutor-{state.id}",
     )
     try:
@@ -509,10 +526,13 @@ async def _session_turn_pipeline(
             # The closing screen lists this turn's correction, so wait once.
             await tutor_task
         coach, coach_pending = _take_coach(state.id, coach_gen, tutor_task, coach_fallback)
+        pitch_advisory = await _finish_pitch_score(score_task)
     except asyncio.CancelledError:
+        _cancel_score_task(score_task)
         _cancel_coach_task(tutor_task)
         raise
     except Exception:
+        _cancel_score_task(score_task)
         _cancel_coach_task(tutor_task)
         raise
 
@@ -534,6 +554,7 @@ async def _session_turn_pipeline(
         audio=audio,
         hint_max=body.hint_max,
         reset=False,
+        pitch_advisory=pitch_advisory,
     )
 
 
@@ -652,6 +673,7 @@ def _pack_turn(
     audio: bytes,
     hint_max: dict[str, int],
     reset: bool,
+    pitch_advisory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     node_now = state.scenario.flow.nodes[state.node_id]
     payload: dict[str, Any] = {
@@ -673,7 +695,13 @@ def _pack_turn(
         "completed_goals": sorted(state.completed_goals),
         "reset": reset,
     }
+    if pitch_advisory is not None:
+        coach = dict(coach)
+        coach["pitch_advisory"] = pitch_advisory
+        payload["coach"] = coach
+        payload["pitch_advisory"] = pitch_advisory
     if kind == "debrief":
+        # Stars follow hint climbs only. Pitch advice is never an input.
         payload["stars"] = stars_earned(state.level, state.hint_peaks)
         payload["goals_completed"] = goals_completed(state)
         payload["corrections"] = _correction_cards(state)
@@ -696,6 +724,7 @@ def _persist_turn(state: SessionState, result: dict[str, Any]) -> None:
             hint_rung=state.hint_rung,
             correction_ja=_optional_text(coach.get("correction_ja")),
             correction_en=_optional_text(coach.get("correction_en")),
+            pitch_advisory=_advisory_dict(result.get("pitch_advisory")),
         )
     if result.get("type") == "debrief":
         peaks = {key: int(rung) for key, rung in state.hint_peaks.items()}
@@ -708,6 +737,48 @@ def _persist_turn(state: SessionState, result: dict[str, Any]) -> None:
             hint_peaks=peaks,
             max_hint_rung=max_rung,
         )
+
+
+def _start_pitch_score(
+    body: TurnRequest, phrase: str
+) -> asyncio.Task[dict[str, Any] | None] | None:
+    if not settings.pron_url.strip() or not phrase or not body.audio_b64:
+        return None
+    try:
+        pcm = base64.b64decode(body.audio_b64, validate=True)
+    except binascii.Error:
+        return None
+    if not pcm:
+        return None
+    return asyncio.create_task(pron_score(pcm, phrase), name="machi-pron-score")
+
+
+async def _finish_pitch_score(
+    task: asyncio.Task[dict[str, Any] | None] | None,
+) -> dict[str, Any] | None:
+    if task is None:
+        return None
+    try:
+        result = await task
+    except Exception:
+        logger.debug("pron score unavailable", exc_info=True)
+        return None
+    if not isinstance(result, dict):
+        return None
+    result["is_advisory"] = True
+    return result
+
+
+def _cancel_score_task(task: asyncio.Task[dict[str, Any] | None] | None) -> None:
+    if task is None or task.done():
+        if task is not None and task.done() and not task.cancelled():
+            task.exception()
+        return
+    task.cancel()
+
+
+def _advisory_dict(value: object) -> dict[str, Any] | None:
+    return value if isinstance(value, dict) else None
 
 
 def _optional_text(value: object) -> str | None:

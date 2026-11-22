@@ -36,6 +36,16 @@ class SessionState:
             self.hint_rung = default_rung_for_level(self.level)
 
 
+def coaching_phrase(state: SessionState, node_id: str, utterance: str) -> str:
+    """First accept phrase on the node, otherwise the learner line."""
+    node = state.scenario.flow.nodes[node_id]
+    for goal_id in expected_goals(node):
+        goal = state.scenario.goal_by_id(goal_id)
+        if goal is not None and goal.accept:
+            return goal.accept[0]
+    return utterance.strip()
+
+
 def expected_goals(node: FlowNode) -> list[str]:
     if node.expects is None:
         return []

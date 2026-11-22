@@ -12,9 +12,9 @@ Full product and technical spec: [docs/SPEC.md](docs/SPEC.md).
 | Orchestrator | Python 3.12, FastAPI, WebSocket/REST, OpenAI SDK |
 | Text tools | [cutlet](https://github.com/polm/cutlet) romaji and fugashi + unidic-lite furigana (MIT / BSD), default in the orchestrator image. `npc_kana` in YAML is an optional whole-line override |
 | Scenario data | YAML + Pydantic validation |
-| Progress | SQLite file on `./data` volume (schema v2: stars, hint peaks, completion) |
+| Progress | SQLite file on `./data` volume (schema v3: stars, hint peaks, completion, pitch advisory) |
 | CPU speech | `speech-cpu` mock ASR + stub WAV TTS |
-| GPU speech | `asr`, `tts`, `pron` containers (stubs; interfaces only) |
+| GPU speech | `asr`, `tts` containers (stubs). `pron` is a CPU reading + F0 advisory service |
 | Assets | nginx static `./assets` |
 
 ## Quick start (CPU demo — no model downloads)
@@ -164,7 +164,8 @@ TTS_URL=http://127.0.0.1:8102 python scripts/bake_npc_audio.py
 web/              Browser UI
 orchestrator/     Session + flow engine + LLM client
 speech-cpu/       CPU-profile ASR/TTS stubs
-asr/ tts/ pron/   GPU-profile stubs (M0/M2)
+asr/ tts/         GPU-profile stubs (M0)
+pron/             CPU pyopenjtalk readings and librosa.pyin pitch advisory (M2)
 scenarios/        YAML scenarios (restaurant MVP included)
 assets/           Scene backgrounds, sprites, and baked NPC audio
 docs/SPEC.md      Product spec
@@ -185,7 +186,8 @@ docker-compose.yml
 | Hands-free | Silero VAD + silence heuristic (500 ms ceiling). Smart Turn v3 optional |
 | Barge-in | New capture stops playback; `audio_start` or `turn` cancels the in-flight server turn |
 | ASR / TTS (CPU) | Mock / stub WAV. Fixed NPC lines in `assets/audio/` play from disk when the spoken text still matches the scenario; other lines use live TTS |
-| ASR / TTS / pron (GPU) | Health stubs |
+| ASR / TTS (GPU) | Health stubs |
+| Pronunciation | CPU `pron` service when `PRON_URL` is set. Expected reading goes to Sora. F0 advice is stored and shown; it does not change stars. Unset `PRON_URL` skips the call |
 | LLM | Live when `LLM_BASE_URL` set; else mock |
 | Lip flap and hint ladder | In the scene |
 | Briefing, warm-up, debrief | Sora briefing, one lenient attempt per key phrase, debrief after pay |

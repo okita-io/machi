@@ -10,6 +10,8 @@ class Settings(BaseSettings):
 
     asr_url: str = "http://speech-cpu:8101"
     tts_url: str = "http://speech-cpu:8102"
+    # Empty skips pronunciation calls. CPU demo leaves this unset.
+    pron_url: str = ""
 
     scenarios_path: str = "/scenarios"
     db_path: str = "/data/machi.sqlite"

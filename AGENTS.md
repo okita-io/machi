@@ -25,7 +25,7 @@ Machi drops an English-speaking learner into illustrated real-world Japanese sce
 | `speech-cpu/` | CPU profile: mock ASR + stub WAV TTS (`asr-cpu` / `tts-cpu` containers) |
 | `asr/` | GPU ASR service stub → Qwen3-ASR / kotoba-whisper |
 | `tts/` | GPU TTS stub → Qwen3-TTS / Irodori / Kokoro |
-| `pron/` | Pronunciation scoring stub (M2) |
+| `pron/` | CPU pronunciation: pyopenjtalk expected readings + librosa.pyin F0 advisory |
 | `scenarios/` | One YAML per scenario; Pydantic schema in `orchestrator/machi/schema.py` |
 | `assets/` | Static backgrounds, sprites, baked NPC audio (nginx `:8080`) |
 | `docs/SPEC.md` | Full architecture, models, latency budgets, milestones |
@@ -178,10 +178,10 @@ Status: `[x]` done in scaffold (PR #1), `[ ]` not started, `[-]` in progress.
 
 | ID | Status | Specification | Dependencies | Acceptance criteria |
 | --- | --- | --- | --- | --- |
-| M2-01 | [ ] | **pron/** service: **pyopenjtalk-plus** expected kana/accent | S0-09 | HTTP API returns reading for target phrase |
+| M2-01 | [x] | **pron/** service: **pyopenjtalk** expected kana/accent (plus-fork not required) | S0-09 | HTTP API returns reading for target phrase |
 | M2-02 | [ ] | **Qwen3-ForcedAligner-0.6B** mora timestamps (async) | M2-01 | Scoring off critical path; results within **1–2 s** per spec |
 | M2-03 | [ ] | **japanese-hubert-base-phoneme-ctc-v4** actual phonemes | M2-01 | Compare learner ASR audio vs expected; advisory strip in UI |
-| M2-04 | [ ] | F0 / pitch-accent advisory (torchcrepe or librosa pyin) | M2-01 | No fail on accent alone |
+| M2-04 | [x] | F0 / pitch-accent advisory (librosa pyin) | M2-01 | No fail on accent alone |
 | M2-05 | [ ] | Correction cards in SQLite + debrief “best two” | M1-08, M2-01 | Phrases from tutor `correction` persisted |
 | M2-06 | [ ] | **FSRS** scheduling in SQLite | M2-05 | Due cards query; `srs_tags` from scenarios honored |
 | M2-07 | [ ] | 2-minute spoken review mode (Sora mini-situation) | M2-06, M0-10 | End-to-end review session API |

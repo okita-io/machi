@@ -1,0 +1,1 @@
+"""CPU profile speech stubs (mock ASR + stub TTS)."""

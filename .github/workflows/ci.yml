@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install orchestrator
+        run: pip install -e "./orchestrator[dev]"
+      - name: Ruff
+        run: python -m ruff check orchestrator/machi orchestrator/tests
+      - name: Pytest
+        run: python -m pytest -q orchestrator/tests
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install and lint
+        working-directory: web
+        run: npm ci && npm run lint
+      - name: Build
+        working-directory: web
+        run: npm run build

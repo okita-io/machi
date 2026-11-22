@@ -1,0 +1,10 @@
+# Voice routing for GPU TTS profile (stub until models are wired)
+sora:
+  engine: irodori
+  design: gentle young woman, warm, slightly playful
+npc:
+  engine: qwen3_tts
+  speaker: Ono_Anna
+fallback:
+  engine: kokoro
+  speaker: jf_alpha

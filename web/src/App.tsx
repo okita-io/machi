@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { formatMicDebug } from "./audio/micDebug";
-import { interpretationClip, playNpcAudio, playSpeech, speechClips } from "./audio/playback";
+import { playNpcAudio, playSpeech, replyClips, type SpeechClip, type SpeechPart } from "./audio/playback";
 import { useMic } from "./audio/useMic";
 import {
   answerReview,
@@ -93,6 +93,18 @@ function SubtitleLine({
   );
 }
 
+function keepFreshReading(current: TurnActivity | null, incoming: TurnActivity): TurnActivity {
+  if (
+    current?.state === "done" &&
+    current.interpreted &&
+    incoming.state !== "done" &&
+    incoming.state !== "error"
+  ) {
+    return current;
+  }
+  return incoming;
+}
+
 function micButtonLabel(
   recording: boolean,
   sending: boolean,
@@ -145,7 +157,8 @@ export default function App() {
   const [handsFree, setHandsFree] = useState(false);
   const [activity, setActivity] = useState<TurnActivity | null>(null);
   const [sessionEpoch, setSessionEpoch] = useState(0);
-  const [replyAudio, setReplyAudio] = useState<{ text: string; wav: string } | null>(null);
+  const [replyAudio, setReplyAudio] = useState<SpeechClip[] | null>(null);
+  const [readingPart, setReadingPart] = useState<SpeechPart | null>(null);
   const [repeating, setRepeating] = useState(false);
   const [ladder, setLadder] = useState<HintLadderState | null>(null);
   const [hintEpoch, setHintEpoch] = useState(0);
@@ -181,9 +194,40 @@ export default function App() {
     (result: TurnResult) => {
       const kind = turnKind(result);
       // Start audio before coach state. A pending note must not delay playback.
-      // The shop line plays first. Sora then speaks the interpretation.
-      const clips = speechClips(result.tts_audio_b64, result.coach_audio_b64);
-      if (clips.length) playSpeech(clips, onMouth);
+      // The shop line plays first. Sora then says what was heard, then the correction.
+      const clips =
+        kind === "warmup"
+          ? replyClips({
+              heard: result.tts_audio_b64,
+              pronounce: result.pronounce_audio_b64,
+            })
+          : replyClips({
+              shop: result.tts_audio_b64,
+              heard: result.coach_audio_b64,
+              pronounce: result.pronounce_audio_b64,
+            });
+      if (clips.length) playSpeech(clips, onMouth, setReadingPart);
+      const coaching = clips.filter((clip) => clip.part !== "shop");
+      setReplyAudio(coaching.length ? coaching : null);
+      const info = result.interpretation;
+      if (info && !result.reset) {
+        setActivity((prev) => ({
+          state: "done",
+          detail: info.detail,
+          heard: info.heard,
+          audio_bytes: prev?.audio_bytes ?? 0,
+          audio_ms: prev?.audio_ms ?? 0,
+          intended_ja: info.intended_ja,
+          intended_kana: info.intended_kana,
+          intended_romaji: info.intended_romaji,
+          instead: info.instead,
+          interpreted: info.interpreted,
+          pronounce: info.pronounce,
+          spoken_interpreted: info.spoken_interpreted,
+          spoken_pronounce: info.spoken_pronounce,
+          matched: info.matched,
+        }));
+      }
       if (result.learner_text) setLearner(result.learner);
       if (result.npc?.ja) setNpc(result.npc);
       if (result.reset) {
@@ -208,9 +252,6 @@ export default function App() {
       if (result.pitch_advisory?.is_advisory) {
         setPitchAdvisory(result.pitch_advisory);
       }
-      const spoken = interpretationClip(kind, result.tts_audio_b64, result.coach_audio_b64);
-      const spokenText = (result.coach?.coach_note_en || "").trim();
-      if (spoken && spokenText) setReplyAudio({ text: spokenText, wav: spoken });
       if (kind === "warmup") {
         const done = Boolean(result.warmup_complete) || result.phase === "roleplay";
         setPhase(done ? "roleplay" : "warmup");
@@ -272,6 +313,7 @@ export default function App() {
       interpreted: "",
       pronounce: "",
     });
+    setReadingPart(null);
   }, []);
 
   const onAudioFallback = useCallback(
@@ -331,7 +373,7 @@ export default function App() {
         // A finished status from the previous clip is not this recording.
         if (expect > 0 && body.audio_bytes !== expect && body.state === "done") return;
         if (expect > 0 && body.audio_bytes === expect) expectBytesRef.current = 0;
-        setActivity(body);
+        setActivity((current) => keepFreshReading(current, body));
       } catch {
         // Keep the last status. The next poll retries.
       }
@@ -346,7 +388,7 @@ export default function App() {
           const expect = expectBytesRef.current;
           if (expect > 0 && body.audio_bytes !== expect && body.state === "done") return;
           if (expect > 0 && body.audio_bytes === expect) expectBytesRef.current = 0;
-          setActivity(body);
+          setActivity((current) => keepFreshReading(current, body));
         })
         .catch(() => undefined);
     };
@@ -530,18 +572,23 @@ export default function App() {
   }
 
   async function onRepeat() {
-    const shown = [activity?.interpreted, activity?.pronounce].filter(Boolean).join(" ").trim();
-    if (!shown) return;
-    if (replyAudio?.text === shown) {
-      playNpcAudio(replyAudio.wav, onMouth);
+    if (replyAudio?.length) {
+      playSpeech(replyAudio, onMouth, setReadingPart);
       return;
     }
+    const heard = (activity?.spoken_interpreted || activity?.interpreted || "").trim();
+    const pronounce = (activity?.spoken_pronounce || "").trim();
+    const fallback = (activity?.pronounce || "").trim();
+    const model = pronounce || (activity?.matched || !fallback ? fallback : `Correction. ${fallback}`);
+    if (!heard && !model) return;
     setRepeating(true);
     setHintError(null);
     try {
-      const wav = await synthesizeSpeech(shown, "guide");
-      setReplyAudio({ text: shown, wav });
-      playNpcAudio(wav, onMouth);
+      const clips: SpeechClip[] = [];
+      if (heard) clips.push({ wav: await synthesizeSpeech(heard, "guide"), part: "heard" });
+      if (model) clips.push({ wav: await synthesizeSpeech(model, "guide"), part: "pronounce" });
+      setReplyAudio(clips);
+      playSpeech(clips, onMouth, setReadingPart);
     } catch {
       setHintError("Couldn't play that line.");
     } finally {
@@ -787,10 +834,16 @@ export default function App() {
             {activity.state === "done" && (activity.interpreted || activity.pronounce) ? (
               <>
                 {activity.interpreted ? (
-                  <span className="interpreted">{activity.interpreted}</span>
+                  <span className={readingPart === "heard" ? "interpreted reading" : "interpreted"}>
+                    <span className="status-kicker">Heard</span>
+                    {activity.interpreted}
+                  </span>
                 ) : null}
                 {activity.pronounce ? (
-                  <span className="pronounce">{activity.pronounce}</span>
+                  <span className={readingPart === "pronounce" ? "pronounce reading" : "pronounce"}>
+                    <span className="status-kicker">{activity.matched ? "Say it" : "Correction"}</span>
+                    {activity.pronounce}
+                  </span>
                 ) : null}
                 <button
                   type="button"

@@ -57,13 +57,16 @@ def test_spoken_audio_during_briefing_is_transcribed():
         assert body["learner_text"] == "ふたりです"
         assert body["phase"] == "warmup"
         assert body["tts_audio_b64"] == base64.b64encode(b"RIFF").decode("ascii")
-        assert spoken_lines
-        text, voice, language = spoken_lines[0]
-        assert "Heard" in text
-        assert "Pronounce it" in text
-        assert "ふたりです" in text
-        assert voice == "irodori"
-        assert language == "Auto"
+        assert len(spoken_lines) == 2
+        heard = next(text for text, _, _ in spoken_lines if "Heard" in text)
+        model = next(text for text, _, _ in spoken_lines if "Pronounce it" in text)
+        assert "Pronounce it" not in heard
+        assert "ふたりです" in model
+        assert not model.startswith("Correction.")
+        assert all(voice == "irodori" for _, voice, _ in spoken_lines)
+        assert all(language == "Auto" for _, _, language in spoken_lines)
+        assert body["tts_audio_b64"]
+        assert body["pronounce_audio_b64"]
 
 
 def test_stars_follow_climbs_above_the_level_default():

@@ -144,6 +144,8 @@ def _interpretation_fields(info: dict[str, Any] | None) -> dict[str, Any]:
         "instead": list(instead) if isinstance(instead, list) else [],
         "interpreted": str(source.get("interpreted") or ""),
         "pronounce": str(source.get("pronounce") or ""),
+        "spoken_interpreted": str(source.get("spoken_interpreted") or ""),
+        "spoken_pronounce": str(source.get("spoken_pronounce") or ""),
         "matched": bool(source.get("matched")),
     }
 

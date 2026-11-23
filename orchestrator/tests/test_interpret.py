@@ -21,6 +21,8 @@ def test_matching_reading_lists_the_phrase_words():
     assert "ふたりです" in info["pronounce"]
     assert "futari desu" in info["pronounce"]
     assert "Two people" in info["pronounce"]
+    assert not info["spoken_pronounce"].startswith("Correction.")
+    assert info["spoken_interpreted"].startswith("Heard")
 
 
 def test_digit_counter_matches_the_same_phrase():
@@ -39,6 +41,9 @@ def test_wrong_word_is_named_instead_of_the_target():
     assert "ふたり" in intended
     assert "instead of" in info["interpreted"]
     assert "Pronounce it ふたりです" in info["pronounce"]
+    assert info["spoken_pronounce"].startswith("Correction.")
+    assert "Correction." not in info["interpreted"]
+    assert "Correction." not in info["pronounce"]
 
 
 def test_silence_asks_for_the_intended_phrase():

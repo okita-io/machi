@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { interpretationClip, playNpcAudio, playSpeech, speechClips, stopPlayback } from "./playback.ts";
+import { playNpcAudio, playSpeech, replyClips, stopPlayback, type SpeechPart } from "./playback.ts";
 
 class FakeAudio {
   static last: FakeAudio | null = null;
@@ -57,33 +57,34 @@ test("stopPlayback halts the current NPC clip", () => {
   }
 });
 
-test("repeat uses Sora's clip, and the warm-up clip when she is the only voice", () => {
-  assert.equal(interpretationClip("turn", "shop", "coach"), "coach");
-  assert.equal(interpretationClip("warmup", "coach-only", ""), "coach-only");
-  assert.equal(interpretationClip("turn", "shop", ""), "");
-});
-
-test("speech plays the shop line, then the spoken interpretation", () => {
+test("speech plays the shop line, then what was heard, then the correction", () => {
   const previous = globalThis.Audio;
   globalThis.Audio = FakeAudio as unknown as typeof Audio;
   FakeAudio.last = null;
   FakeAudio.all = [];
+  const parts: Array<SpeechPart | null> = [];
   try {
-    assert.deepEqual(speechClips("shop", "coach"), ["shop", "coach"]);
-    assert.deepEqual(speechClips("", "coach"), ["coach"]);
-    playSpeech(speechClips("shop", "coach"));
-    const shop = FakeAudio.all[0];
-    assert.ok(shop);
-    assert.match(shop.src, /shop$/);
-    assert.equal(FakeAudio.all.length, 1);
-    shop.emit("ended");
-    const coach = FakeAudio.all[1];
-    assert.ok(coach);
-    assert.match(coach.src, /coach$/);
-    assert.equal(shop.paused, false);
+    const clips = replyClips({ shop: "shop", heard: "heard", pronounce: "correction" });
+    assert.deepEqual(
+      clips.map((clip) => clip.part),
+      ["shop", "heard", "pronounce"],
+    );
+    assert.deepEqual(
+      replyClips({ heard: "heard" }).map((clip) => clip.wav),
+      ["heard"],
+    );
+    playSpeech(clips, undefined, (part) => parts.push(part));
+    assert.deepEqual(parts, ["shop"]);
+    FakeAudio.all[0]?.emit("ended");
+    assert.deepEqual(parts, ["shop", "heard"]);
+    FakeAudio.all[1]?.emit("ended");
+    assert.deepEqual(parts, ["shop", "heard", "pronounce"]);
+    const correction = FakeAudio.all[2];
+    assert.ok(correction);
+    assert.match(correction.src, /correction$/);
+    correction.emit("ended");
+    assert.deepEqual(parts, ["shop", "heard", "pronounce", null]);
     stopPlayback();
-    coach.emit("ended");
-    assert.equal(FakeAudio.all.length, 2);
   } finally {
     globalThis.Audio = previous;
   }

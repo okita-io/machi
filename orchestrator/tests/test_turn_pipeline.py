@@ -132,12 +132,15 @@ def test_audio_b64_only_turn_runs_asr_llm_tts(monkeypatch):
     npc = next(item for item in synth if item["text"] == SEAT_JA)
     assert npc["voice"] == "qwen3_tts"
     assert "language" not in npc
-    spoken = next(item for item in synth if item["text"] != SEAT_JA)
-    assert "Heard" in spoken["text"]
-    assert "Pronounce it" in spoken["text"]
-    assert spoken["voice"] == "irodori"
-    assert spoken["language"] == "Auto"
-    assert body["coach_audio_b64"] == base64.b64encode(WAV).decode("ascii")
+    spoken = [item for item in synth if item["text"] != SEAT_JA]
+    assert len(spoken) == 2
+    assert any("Heard" in item["text"] and "Pronounce it" not in item["text"] for item in spoken)
+    assert any("Pronounce it" in item["text"] for item in spoken)
+    assert all(not item["text"].startswith("Correction.") for item in spoken)
+    assert all(item["voice"] == "irodori" and item["language"] == "Auto" for item in spoken)
+    wav = base64.b64encode(WAV).decode("ascii")
+    assert body["coach_audio_b64"] == wav
+    assert body["pronounce_audio_b64"] == wav
 
     assert npc_calls and "ふたりです" in npc_calls[0]["user"]
     assert npc_calls[0]["fallback_line"] == SEAT_JA
@@ -229,7 +232,7 @@ def test_ws_turn_without_text_runs_same_pipeline(monkeypatch):
     assert result["tts_audio_b64"] == base64.b64encode(WAV).decode("ascii")
     assert base64.b64decode(posts[0][1]["audio_b64"]) == PCM
     assert posts[0][0].endswith("/v1/transcribe")
-    assert posts[1][0].endswith("/v1/synthesize")
+    assert any(url.endswith("/v1/synthesize") for url, _ in posts)
     assert npc_calls and tutor_calls
 
 

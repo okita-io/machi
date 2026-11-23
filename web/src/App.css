@@ -367,9 +367,31 @@ header h1 {
   display: block;
 }
 
+.turn-status .status-kicker {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #adb5bd;
+}
+
 .turn-status .pronounce {
-  margin-top: 0.35rem;
+  margin-top: 0.45rem;
+  padding: 0.4rem 0.55rem;
+  border-left: 3px solid #f59f00;
+  border-radius: 6px;
+  background: rgba(245, 159, 0, 0.14);
   font-weight: 600;
+}
+
+.turn-status .pronounce .status-kicker {
+  color: #ffd43b;
+}
+
+.turn-status .reading {
+  box-shadow: inset 0 0 0 2px #ffd43b;
 }
 
 .turn-status .repeat {

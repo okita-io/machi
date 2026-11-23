@@ -2,54 +2,71 @@
 
 import { analyserGain, mouthFrameForGain, type MouthFrame } from "../mouth.ts";
 
+export type SpeechPart = "shop" | "heard" | "pronounce";
+
+export type SpeechClip = {
+  wav: string;
+  part: SpeechPart;
+};
+
 let current: HTMLAudioElement | null = null;
 let rafId = 0;
 let audioCtx: AudioContext | null = null;
 let playGeneration = 0;
+let onPartListener: ((part: SpeechPart | null) => void) | null = null;
 
-/** Shop line first, then Sora's spoken interpretation when that clip exists. */
-export function speechClips(npcWav?: string, coachWav?: string): string[] {
-  const clips: string[] = [];
-  if (npcWav) clips.push(npcWav);
-  if (coachWav) clips.push(coachWav);
+/** Shop line, then what was heard, then the correction as its own clip. */
+export function replyClips(parts: {
+  shop?: string;
+  heard?: string;
+  pronounce?: string;
+}): SpeechClip[] {
+  const clips: SpeechClip[] = [];
+  if (parts.shop) clips.push({ wav: parts.shop, part: "shop" });
+  if (parts.heard) clips.push({ wav: parts.heard, part: "heard" });
+  if (parts.pronounce) clips.push({ wav: parts.pronounce, part: "pronounce" });
   return clips;
 }
 
-/** The clip Repeat should play: Sora's line, or the warm-up clip when that is the only one. */
-export function interpretationClip(kind: string, npcWav?: string, coachWav?: string): string {
-  if (coachWav) return coachWav;
-  if (kind === "warmup" && npcWav) return npcWav;
-  return "";
-}
-
 export function playNpcAudio(wavB64: string, onMouth?: (frame: MouthFrame) => void): void {
-  playSpeech([wavB64], onMouth);
+  playSpeech([{ wav: wavB64, part: "shop" }], onMouth);
 }
 
-export function playSpeech(wavs: string[], onMouth?: (frame: MouthFrame) => void): void {
+export function playSpeech(
+  clips: SpeechClip[],
+  onMouth?: (frame: MouthFrame) => void,
+  onPart?: (part: SpeechPart | null) => void,
+): void {
   stopPlayback();
-  const clips = wavs.filter((item) => item.length > 0);
-  if (!clips.length) return;
-  startClip(clips, 0, playGeneration, onMouth);
+  const playable = clips.filter((item) => item.wav.length > 0);
+  if (!playable.length) return;
+  onPartListener = onPart ?? null;
+  startClip(playable, 0, playGeneration, onMouth);
 }
 
 function startClip(
-  clips: string[],
+  clips: SpeechClip[],
   index: number,
   generation: number,
   onMouth?: (frame: MouthFrame) => void,
 ): void {
   if (generation !== playGeneration) return;
-  const audio = new Audio(`data:audio/wav;base64,${clips[index]}`);
+  const clip = clips[index];
+  if (!clip) return;
+  onPartListener?.(clip.part);
+  const audio = new Audio(`data:audio/wav;base64,${clip.wav}`);
   current = audio;
   const hasNext = index + 1 < clips.length;
-  if (onMouth || hasNext) {
-    audio.addEventListener("ended", () => {
-      if (generation !== playGeneration || current !== audio) return;
-      if (hasNext) startClip(clips, index + 1, generation, onMouth);
-      else if (onMouth) onMouth("closed");
-    });
-  }
+  audio.addEventListener("ended", () => {
+    if (generation !== playGeneration || current !== audio) return;
+    if (hasNext) startClip(clips, index + 1, generation, onMouth);
+    else {
+      const notify = onPartListener;
+      onPartListener = null;
+      notify?.(null);
+      if (onMouth) onMouth("closed");
+    }
+  });
   attachAnalyser(audio, onMouth);
   void audio.play().catch(() => {
     // Autoplay can reject. The element stays current so barge-in can still stop it.
@@ -58,6 +75,9 @@ function startClip(
 
 export function stopPlayback(): void {
   playGeneration += 1;
+  const notify = onPartListener;
+  onPartListener = null;
+  notify?.(null);
   clearAnalyser();
   const audio = current;
   if (!audio) return;

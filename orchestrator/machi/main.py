@@ -41,7 +41,7 @@ from machi.db import (
     session_progress,
 )
 from machi.fsrs import format_dt
-from machi.interpret import build_interpretation, choose_intended, stamp_coach
+from machi.interpret import build_interpretation, choose_intended, spoken_parts, stamp_coach
 from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
 from machi.llm import LlmClient, render_prompt
 from machi.nlp import build_ruby_html, match_strength, to_romaji
@@ -694,23 +694,21 @@ async def _warmup_pipeline(
         coach = dict(payload["coach"])
         stamp_coach(coach, info)
         payload["coach"] = coach
-        line = _reply_line(info)
-        if line:
+        heard_line, pronounce_line = spoken_parts(info)
+        if heard_line or pronounce_line:
             note_stage(
                 state.id,
                 "speaking",
                 "Speaking the interpretation.",
                 heard=utterance,
             )
-            try:
-                with timer.measure(STAGE_TTS):
-                    timer.set_source(STAGE_TTS, "live")
-                    audio = await _speak_reply(line)
-            except SpeechError:
-                logger.exception("interpretation speech failed")
-                audio = b""
-            if audio:
-                payload["tts_audio_b64"] = base64.b64encode(audio).decode("ascii")
+            with timer.measure(STAGE_TTS):
+                timer.set_source(STAGE_TTS, "live")
+                heard_audio, pronounce_audio = await _speak_reply_parts(info)
+            if heard_audio:
+                payload["tts_audio_b64"] = base64.b64encode(heard_audio).decode("ascii")
+            if pronounce_audio:
+                payload["pronounce_audio_b64"] = base64.b64encode(pronounce_audio).decode("ascii")
         else:
             timer.skip(STAGE_TTS)
     else:
@@ -772,27 +770,41 @@ def _spoken_ms(audio_b64: str | None) -> int:
 _REPLY_TTS_LIMIT = 800
 
 
-def _reply_line(info: dict[str, Any] | None) -> str:
-    """The interpretation sentence Sora should say aloud."""
-    if not info:
-        return ""
-    return str(info.get("detail") or "").strip()[:_REPLY_TTS_LIMIT]
-
-
 async def _speak_reply(line: str) -> bytes:
-    """Synthesize the coaching sentence in Sora's voice."""
+    """Synthesize one coaching sentence in Sora's voice."""
     return await synthesize(line, voice=resolve_voice("guide"), language="Auto")
 
 
-def _start_reply_speech(info: dict[str, Any] | None) -> asyncio.Task[bytes] | None:
-    """Begin Sora's clip so it overlaps the shop's reply."""
-    line = _reply_line(info)
-    if not line:
+async def _speak_reply_parts(info: dict[str, Any] | None) -> tuple[bytes, bytes]:
+    """Say the interpretation, then the correction, as two clips."""
+    heard, pronounce = spoken_parts(info)
+
+    async def _one(line: str) -> bytes:
+        if not line:
+            return b""
+        try:
+            return await _speak_reply(line[:_REPLY_TTS_LIMIT])
+        except SpeechError:
+            logger.exception("coaching speech failed")
+            return b""
+
+    # One GPU voice at a time. A second request in parallel times out.
+    heard_audio = await _one(heard)
+    pronounce_audio = await _one(pronounce)
+    return heard_audio, pronounce_audio
+
+
+def _start_reply_speech(
+    info: dict[str, Any] | None,
+) -> asyncio.Task[tuple[bytes, bytes]] | None:
+    """Begin Sora's clips so they overlap the shop's reply."""
+    heard, pronounce = spoken_parts(info)
+    if not heard and not pronounce:
         return None
-    return asyncio.create_task(_speak_reply(line), name="machi-interpretation-tts")
+    return asyncio.create_task(_speak_reply_parts(info), name="machi-interpretation-tts")
 
 
-def _cancel_audio_task(task: asyncio.Task[bytes] | None) -> None:
+def _cancel_audio_task(task: asyncio.Task[Any] | None) -> None:
     if task is None:
         return
     if task.done():
@@ -803,7 +815,7 @@ def _cancel_audio_task(task: asyncio.Task[bytes] | None) -> None:
     task.cancel()
 
 
-def _retrieve_audio_error(task: asyncio.Task[bytes]) -> None:
+def _retrieve_audio_error(task: asyncio.Task[Any]) -> None:
     if task.cancelled():
         return
     task.exception()
@@ -860,7 +872,7 @@ async def _session_turn_pipeline(
         hint_rung=state.hint_rung,
     )
     interpretation = None
-    reply_task: asyncio.Task[bytes] | None = None
+    reply_task: asyncio.Task[tuple[bytes, bytes]] | None = None
     if body.audio_b64:
         interpretation = build_interpretation(
             utterance,
@@ -914,7 +926,8 @@ async def _session_turn_pipeline(
                 f"Heard 「{utterance or '…'}」. Preparing the spoken reply.",
                 heard=utterance,
             )
-        coach_audio = b""
+        heard_audio = b""
+        pronounce_audio = b""
         try:
             with timer.measure(STAGE_TTS):
                 cached = cached_npc_wav(settings.assets_path, state.scenario, npc_ja)
@@ -929,11 +942,7 @@ async def _session_turn_pipeline(
         except SpeechError as exc:
             raise _speech_unavailable(exc) from exc
         if reply_task is not None:
-            try:
-                coach_audio = await reply_task
-            except SpeechError:
-                logger.exception("interpretation speech failed")
-                coach_audio = b""
+            heard_audio, pronounce_audio = await reply_task
         # Let a tutor call that already finished publish before we decide.
         # A still-running tutor stays pending so this response can carry audio.
         await asyncio.sleep(0)
@@ -990,8 +999,10 @@ async def _session_turn_pipeline(
     )
     if interpretation is not None:
         payload["interpretation"] = interpretation
-    if coach_audio:
-        payload["coach_audio_b64"] = base64.b64encode(coach_audio).decode("ascii")
+    if heard_audio:
+        payload["coach_audio_b64"] = base64.b64encode(heard_audio).decode("ascii")
+    if pronounce_audio:
+        payload["pronounce_audio_b64"] = base64.b64encode(pronounce_audio).decode("ascii")
     return payload
 
 

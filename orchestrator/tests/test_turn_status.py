@@ -70,6 +70,8 @@ def test_activity_describes_what_was_recognized():
 
 
 def test_activity_names_the_word_heard_instead():
+    spoken_lines: list[str] = []
+
     async def fake_transcribe(
         audio_pcm: bytes | None = None,
         text_override: str | None = None,
@@ -78,7 +80,8 @@ def test_activity_names_the_word_heard_instead():
         return "ひとりです"
 
     async def fake_synthesize(text: str, voice: str = "npc", language: str | None = None) -> bytes:
-        del text, voice, language
+        del voice, language
+        spoken_lines.append(text)
         return b"RIFF"
 
     with (
@@ -94,6 +97,8 @@ def test_activity_names_the_word_heard_instead():
         audio_b64 = base64.b64encode(b"\x00\x00" * 1600).decode("ascii")
         spoken = client.post(f"/sessions/{sid}/turn", json={"audio_b64": audio_b64})
         assert spoken.status_code == 200, spoken.text
+        assert any(text.startswith("Correction.") for text in spoken_lines)
+        assert spoken.json()["pronounce_audio_b64"]
         coach = spoken.json()["coach"]["coach_note_en"]
         assert "instead of" in coach
         assert "ふたりです" in coach

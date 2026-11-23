@@ -94,6 +94,7 @@ def build_interpretation(
     )
     pronounce = _pronounce_sentence(ja, kana, romaji, meaning, tip) if target_text else ""
     detail = " ".join(part for part in (interpreted, pronounce) if part)
+    spoken_heard, spoken_pronounce = spoken_lines(interpreted, pronounce, matched=matched)
     return {
         "heard": heard_text,
         "intended_ja": ja,
@@ -105,9 +106,37 @@ def build_interpretation(
         "extra": extras,
         "interpreted": interpreted,
         "pronounce": pronounce,
+        "spoken_interpreted": spoken_heard,
+        "spoken_pronounce": spoken_pronounce,
         "detail": detail,
         "matched": matched,
     }
+
+
+def spoken_parts(info: dict[str, Any] | None) -> tuple[str, str]:
+    """The two clips Sora says: what was heard, then how to say the phrase."""
+    if not info:
+        return "", ""
+    heard = str(info.get("spoken_interpreted") or info.get("interpreted") or "").strip()
+    pronounce = str(info.get("spoken_pronounce") or "").strip()
+    if pronounce or "spoken_pronounce" in info:
+        return heard, pronounce
+    return spoken_lines(
+        str(info.get("interpreted") or ""),
+        str(info.get("pronounce") or ""),
+        matched=bool(info.get("matched")),
+    )
+
+
+def spoken_lines(interpreted: str, pronounce: str, *, matched: bool) -> tuple[str, str]:
+    """Keep the correction in its own sentence, announced when the phrase was missed."""
+    heard = interpreted.strip()
+    line = pronounce.strip()
+    if not line:
+        return heard, ""
+    if matched:
+        return heard, line
+    return heard, f"Correction. {line}"
 
 
 def stamp_coach(coach: dict[str, Any], info: dict[str, Any]) -> None:

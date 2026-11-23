@@ -168,6 +168,8 @@ export type TurnResult = {
   coach_pending?: boolean;
   tts_audio_b64: string;
   coach_audio_b64?: string;
+  pronounce_audio_b64?: string;
+  interpretation?: Interpretation;
   completed_goals: string[];
   goal_hits?: string[];
   accepted?: boolean;
@@ -196,6 +198,20 @@ export type InterpretedWord = {
   intended: string;
 };
 
+export type Interpretation = {
+  heard: string;
+  detail: string;
+  interpreted: string;
+  pronounce: string;
+  spoken_interpreted?: string;
+  spoken_pronounce?: string;
+  matched: boolean;
+  intended_ja?: string;
+  intended_kana?: string;
+  intended_romaji?: string;
+  instead?: InterpretedWord[];
+};
+
 export type TurnActivity = {
   state: "idle" | "received" | "transcribing" | "thinking" | "speaking" | "scoring" | "done" | "error";
   detail: string;
@@ -208,6 +224,8 @@ export type TurnActivity = {
   instead?: InterpretedWord[];
   interpreted?: string;
   pronounce?: string;
+  spoken_interpreted?: string;
+  spoken_pronounce?: string;
   matched?: boolean;
 };
 

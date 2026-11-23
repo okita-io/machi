@@ -15,6 +15,13 @@ def test_party_size_match():
     assert match_goal("えっと、ふたりです", ["ふたりです", "二人です"])
 
 
+def test_party_size_accepts_whisper_digit():
+    spec = load_scenario(RESTAURANT)
+    state = new_session(spec, level=1)
+    hits, ok = evaluate_turn(state, "2人です。")
+    assert ok and "party_size" in hits
+
+
 def test_greet_to_seat_flow():
     spec = load_scenario(RESTAURANT)
     state = new_session(spec, level=1)

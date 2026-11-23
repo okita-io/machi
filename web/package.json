@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test src/audio/pcm.test.ts src/audio/playback.test.ts src/hintLevel.test.ts src/hintLadder.test.ts src/mouth.test.ts src/coach.test.ts src/flow.test.ts src/chroma.test.ts src/townMap.test.ts src/pitchAdvisory.test.ts src/soraExpressions.test.ts src/useViewport.test.ts src/review.test.ts src/editor.test.ts",
+    "test": "node --experimental-strip-types --test src/audio/pcm.test.ts src/audio/micDebug.test.ts src/audio/playback.test.ts src/hintLevel.test.ts src/hintLadder.test.ts src/mouth.test.ts src/coach.test.ts src/flow.test.ts src/chroma.test.ts src/townMap.test.ts src/pitchAdvisory.test.ts src/soraExpressions.test.ts src/useViewport.test.ts src/review.test.ts src/editor.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

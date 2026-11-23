@@ -348,16 +348,51 @@ header h1 {
   position: relative;
   z-index: 3;
   width: 100%;
-  max-width: min(36%, 21rem);
-  justify-self: start;
   background: rgba(0, 0, 0, 0.72);
   padding: 0.75rem 1rem;
   border-radius: 8px;
 }
 
-/* When no briefing panel, subtitles can use the full stage width. */
-.scene-column:not(:has(.flow-panel)) .subtitle {
-  max-width: none;
+.turn-status {
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  border-radius: 8px;
+  background: #1e2433;
+  border: 1px solid #3d4a66;
+  line-height: 1.4;
+}
+
+.turn-status .interpreted,
+.turn-status .pronounce {
+  display: block;
+}
+
+.turn-status .pronounce {
+  margin-top: 0.35rem;
+  font-weight: 600;
+}
+
+.turn-status .repeat {
+  margin-top: 0.55rem;
+  padding: 0.3rem 0.75rem;
+  border: none;
+  border-radius: 6px;
+  background: #5c7cfa;
+  color: #fff;
+  cursor: pointer;
+}
+
+.turn-status .repeat:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.turn-status[data-state="done"] {
+  border-color: #2b8a3e;
+}
+
+.turn-status[data-state="error"] {
+  border-color: #c92a2a;
 }
 
 .subtitle-line + .subtitle-line {
@@ -427,6 +462,7 @@ header h1 {
 .input-bar {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   align-items: flex-end;
   background: #1e2433;
@@ -487,6 +523,27 @@ header h1 {
   font-size: 0.75rem;
   opacity: 0.85;
   max-width: 14rem;
+}
+
+.mic-debug {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 0.75rem;
+  color: #d0d7e2;
+}
+
+.mic-debug summary {
+  cursor: pointer;
+}
+
+.mic-debug pre {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, monospace;
+}
+
+.mic-debug[data-blocked="true"] {
+  color: #ffc9c9;
 }
 
 .loading {
@@ -673,10 +730,6 @@ header h1 {
   .stage:has(.flow-panel) .guide-slot {
     right: 0;
     height: 52%;
-  }
-
-  .scene-column:has(.flow-panel) .subtitle {
-    max-width: min(48%, 15.5rem);
   }
 
   .app:not(.town-mode) .input-bar {

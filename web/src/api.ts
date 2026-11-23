@@ -167,6 +167,7 @@ export type TurnResult = {
   coach: CoachPayload;
   coach_pending?: boolean;
   tts_audio_b64: string;
+  coach_audio_b64?: string;
   completed_goals: string[];
   goal_hits?: string[];
   accepted?: boolean;
@@ -190,6 +191,32 @@ export type TurnResult = {
   node_id?: string;
 };
 
+export type InterpretedWord = {
+  heard: string;
+  intended: string;
+};
+
+export type TurnActivity = {
+  state: "idle" | "received" | "transcribing" | "thinking" | "speaking" | "scoring" | "done" | "error";
+  detail: string;
+  heard: string;
+  audio_bytes: number;
+  audio_ms: number;
+  intended_ja?: string;
+  intended_kana?: string;
+  intended_romaji?: string;
+  instead?: InterpretedWord[];
+  interpreted?: string;
+  pronounce?: string;
+  matched?: boolean;
+};
+
+export async function fetchTurnActivity(sessionId: string): Promise<TurnActivity> {
+  const r = await fetch(`${API_BASE}/sessions/${sessionId}/activity`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 export async function sendTurn(
   sessionId: string,
   text: string,
@@ -205,6 +232,21 @@ export async function sendTurn(
       ...(options?.skipWarmup ? { skip_warmup: true } : {}),
       ...(options?.advance ? { advance: options.advance } : {}),
     }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+/** Push-to-talk clip. No `text`, so the server transcribes this PCM. */
+export async function sendAudioTurn(
+  sessionId: string,
+  audioB64: string,
+  hintMax: Record<string, number> = {},
+): Promise<TurnResult> {
+  const r = await fetch(`${API_BASE}/sessions/${sessionId}/turn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ audio_b64: audioB64, hint_max: hintMax }),
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();

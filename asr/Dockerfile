@@ -5,7 +5,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir fastapi uvicorn pydantic "faster-whisper>=1.1.0"
 
-COPY app.py ./
+COPY app.py audio_io.py ./
 
 ENV ASR_ENGINE=kotoba-whisper-faster
 EXPOSE 8101

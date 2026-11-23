@@ -114,7 +114,9 @@ def test_audio_b64_only_turn_runs_asr_llm_tts(monkeypatch):
     assert body["npc"]["romaji"] == to_romaji(SEAT_JA)
     assert body["npc"]["romaji"]
     assert body["tts_audio_b64"] == base64.b64encode(WAV).decode("ascii")
-    assert body["coach"]["coach_note_en"] == "Nice!"
+    assert "Heard" in body["coach"]["coach_note_en"]
+    assert "Pronounce it" in body["coach"]["coach_note_en"]
+    assert body["interpretation"]["matched"] is True
     assert body["coach"]["sora_expression"] == "cheer"
     assert body["coach"]["sentiment"] == "success"
     assert body["coach_pending"] is False
@@ -126,9 +128,16 @@ def test_audio_b64_only_turn_runs_asr_llm_tts(monkeypatch):
     assert posts[0][0] == f"{asr_url}/v1/transcribe"
     assert base64.b64decode(posts[0][1]["audio_b64"]) == PCM
     assert "text" not in posts[0][1]
-    assert posts[1][0] == f"{tts_url}/v1/synthesize"
-    assert posts[1][1]["text"] == SEAT_JA
-    assert posts[1][1]["voice"] == "qwen3_tts"
+    synth = [body for url, body in posts if url == f"{tts_url}/v1/synthesize"]
+    npc = next(item for item in synth if item["text"] == SEAT_JA)
+    assert npc["voice"] == "qwen3_tts"
+    assert "language" not in npc
+    spoken = next(item for item in synth if item["text"] != SEAT_JA)
+    assert "Heard" in spoken["text"]
+    assert "Pronounce it" in spoken["text"]
+    assert spoken["voice"] == "irodori"
+    assert spoken["language"] == "Auto"
+    assert body["coach_audio_b64"] == base64.b64encode(WAV).decode("ascii")
 
     assert npc_calls and "ふたりです" in npc_calls[0]["user"]
     assert npc_calls[0]["fallback_line"] == SEAT_JA

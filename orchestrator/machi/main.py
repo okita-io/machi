@@ -41,6 +41,7 @@ from machi.db import (
     session_progress,
 )
 from machi.fsrs import format_dt
+from machi.interpret import build_interpretation, choose_intended, stamp_coach
 from machi.latency import STAGE_ASR, STAGE_LLM, STAGE_TTS, TurnLatency
 from machi.llm import LlmClient, render_prompt
 from machi.nlp import build_ruby_html, match_strength, to_romaji
@@ -87,6 +88,15 @@ from machi.session import (
     scripted_npc_line,
     stars_earned,
     warmup_queue,
+)
+from machi.turn_status import (
+    note_done,
+    note_error,
+    note_received,
+    note_stage,
+)
+from machi.turn_status import (
+    snapshot as turn_snapshot,
 )
 from machi.turn_taking import (
     TurnDecision,
@@ -410,6 +420,14 @@ async def enroll_session_reviews(session_id: str) -> dict[str, int]:
     return {"added": enroll_corrections(path, session_id, due_at=due_at)}
 
 
+@app.get("/sessions/{session_id}/activity")
+async def session_activity(session_id: str) -> dict[str, Any]:
+    """What the spoken turn is doing right now. The browser polls this once a second."""
+    if session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail="session not found")
+    return turn_snapshot(session_id)
+
+
 @app.get("/sessions/{session_id}/coach")
 async def session_coach(session_id: str) -> dict[str, Any]:
     """Tutor note for a turn whose NPC audio already returned."""
@@ -438,13 +456,35 @@ async def session_turn(
 
     timer = TurnLatency()
     snapshot = _snapshot_flow(state)
+    if body.audio_b64:
+        note_received(session_id, body.audio_b64)
     try:
         result = await _dispatch_turn(state, body, timer)
     except asyncio.CancelledError:
         # Barge-in: drop flow mutations so the learner can say the line again.
         _restore_flow(state, snapshot)
         timer.emit(session_id=session_id, cancelled=True)
+        if body.audio_b64:
+            note_error(session_id, "The turn was cancelled.")
         raise
+    except HTTPException as exc:
+        if body.audio_b64:
+            detail = exc.detail if isinstance(exc.detail, str) else "The turn failed."
+            note_error(session_id, detail)
+        raise
+
+    if body.audio_b64:
+        heard = result.get("learner_text")
+        hits = result.get("goal_hits")
+        passed = result.get("warmup_passed")
+        info = result.get("interpretation")
+        note_done(
+            session_id,
+            heard if isinstance(heard, str) else "",
+            goal_hits=hits if isinstance(hits, list) else None,
+            warmup_passed=passed if isinstance(passed, bool) else None,
+            interpretation=info if isinstance(info, dict) else None,
+        )
 
     for key, value in timer.header_map().items():
         response.headers[key] = value
@@ -470,6 +510,9 @@ async def _dispatch_turn(
     elif body.advance == "warmup" and state.phase == PHASE_BRIEFING:
         begin_warmup(state)
         return _warmup_status(state, utterance="", passed=None)
+    elif state.phase == PHASE_BRIEFING and body.audio_b64:
+        # Hold-to-talk from the briefing screen is the first spoken attempt.
+        begin_warmup(state)
     if state.phase == PHASE_BRIEFING:
         raise HTTPException(status_code=409, detail="warmup_incomplete")
     if state.phase == PHASE_WARMUP:
@@ -590,9 +633,15 @@ async def _warmup_pipeline(
     timer: TurnLatency,
 ) -> dict[str, Any]:
     """One lenient attempt per key phrase. Goals are not scored."""
-    utterance = await _hear_utterance(body, timer)
+    utterance = await _hear_utterance(body, timer, state.id)
+    if body.audio_b64:
+        note_stage(
+            state.id,
+            "scoring",
+            f"Heard 「{utterance or '…'}」. Comparing it with the warm-up phrase.",
+            heard=utterance,
+        )
     timer.skip(STAGE_LLM)
-    timer.skip(STAGE_TTS)
     attempt = apply_warmup_attempt(state, utterance)
     payload = _warmup_status(
         state,
@@ -624,17 +673,74 @@ async def _warmup_pipeline(
             coach["correction_en"] = phrase.en
             coach["correction"] = phrase.ja
             payload["coach"] = coach
+    if body.audio_b64:
+        phrase = attempt.get("phrase")
+        intended = None
+        if phrase is not None:
+            intended = {
+                "ja": phrase.ja,
+                "kana": phrase.kana,
+                "romaji": phrase.romaji,
+                "en": phrase.en,
+                "tip": "",
+            }
+        info = build_interpretation(
+            utterance,
+            intended,
+            asr_ms=_asr_ms(timer),
+            audio_ms=_spoken_ms(body.audio_b64),
+        )
+        payload["interpretation"] = info
+        coach = dict(payload["coach"])
+        stamp_coach(coach, info)
+        payload["coach"] = coach
+        line = _reply_line(info)
+        if line:
+            note_stage(
+                state.id,
+                "speaking",
+                "Speaking the interpretation.",
+                heard=utterance,
+            )
+            try:
+                with timer.measure(STAGE_TTS):
+                    timer.set_source(STAGE_TTS, "live")
+                    audio = await _speak_reply(line)
+            except SpeechError:
+                logger.exception("interpretation speech failed")
+                audio = b""
+            if audio:
+                payload["tts_audio_b64"] = base64.b64encode(audio).decode("ascii")
+        else:
+            timer.skip(STAGE_TTS)
+    else:
+        timer.skip(STAGE_TTS)
     return payload
 
 
-async def _hear_utterance(body: TurnRequest, timer: TurnLatency) -> str:
+async def _hear_utterance(
+    body: TurnRequest,
+    timer: TurnLatency,
+    session_id: str = "",
+) -> str:
     # Blank text is not a typed turn, so audio_b64 alone still reaches ASR.
     utterance = (body.text or "").strip()
+    spoken = bool(body.audio_b64) and not utterance
     try:
-        if body.audio_b64 and not utterance:
-            pcm = _decode_audio_b64(body.audio_b64)
+        if spoken:
+            if session_id:
+                note_stage(session_id, "transcribing", "Transcribing the recording you sent.")
+            pcm = _decode_audio_b64(body.audio_b64 or "")
             with timer.measure(STAGE_ASR):
                 utterance = await transcribe(audio_pcm=pcm)
+            if session_id:
+                heard = utterance.strip()
+                detail = (
+                    f"Recognized 「{heard}」."
+                    if heard
+                    else "The recording did not contain recognizable speech."
+                )
+                note_stage(session_id, "transcribing", detail, heard=heard)
         elif not utterance:
             with timer.measure(STAGE_ASR):
                 utterance = await transcribe(text_override="")
@@ -646,12 +752,79 @@ async def _hear_utterance(body: TurnRequest, timer: TurnLatency) -> str:
     return utterance
 
 
+def _asr_ms(timer: TurnLatency) -> float | None:
+    elapsed = timer.stages_ms.get(STAGE_ASR)
+    if isinstance(elapsed, int | float):
+        return float(elapsed)
+    return None
+
+
+def _spoken_ms(audio_b64: str | None) -> int:
+    if not audio_b64:
+        return 0
+    try:
+        return len(base64.b64decode(audio_b64)) // 32
+    except (binascii.Error, ValueError):
+        return 0
+
+
+# GPU TTS rejects lines longer than this. The coaching sentence is one utterance.
+_REPLY_TTS_LIMIT = 800
+
+
+def _reply_line(info: dict[str, Any] | None) -> str:
+    """The interpretation sentence Sora should say aloud."""
+    if not info:
+        return ""
+    return str(info.get("detail") or "").strip()[:_REPLY_TTS_LIMIT]
+
+
+async def _speak_reply(line: str) -> bytes:
+    """Synthesize the coaching sentence in Sora's voice."""
+    return await synthesize(line, voice=resolve_voice("guide"), language="Auto")
+
+
+def _start_reply_speech(info: dict[str, Any] | None) -> asyncio.Task[bytes] | None:
+    """Begin Sora's clip so it overlaps the shop's reply."""
+    line = _reply_line(info)
+    if not line:
+        return None
+    return asyncio.create_task(_speak_reply(line), name="machi-interpretation-tts")
+
+
+def _cancel_audio_task(task: asyncio.Task[bytes] | None) -> None:
+    if task is None:
+        return
+    if task.done():
+        if not task.cancelled():
+            task.exception()
+        return
+    task.add_done_callback(_retrieve_audio_error)
+    task.cancel()
+
+
+def _retrieve_audio_error(task: asyncio.Task[bytes]) -> None:
+    if task.cancelled():
+        return
+    task.exception()
+
+
+def _intended_line(state: SessionState, node_id: str) -> dict[str, str] | None:
+    """Phrase the learner is aiming for on this node, when the node expects one."""
+    node = state.scenario.flow.nodes[node_id]
+    for goal_id in expected_goals(node):
+        goal = state.scenario.goal_by_id(goal_id)
+        if goal is not None and goal.accept:
+            return choose_intended(goal.accept, tip=goal.coach_en or "")
+    return None
+
+
 async def _session_turn_pipeline(
     state: SessionState,
     body: TurnRequest,
     timer: TurnLatency,
 ) -> dict[str, Any]:
-    utterance = await _hear_utterance(body, timer)
+    utterance = await _hear_utterance(body, timer, state.id)
 
     prev_node_id = state.node_id
     expected_ids = expected_goals(state.scenario.flow.nodes[prev_node_id])
@@ -686,6 +859,17 @@ async def _session_turn_pipeline(
         coach_note=coach_note,
         hint_rung=state.hint_rung,
     )
+    interpretation = None
+    reply_task: asyncio.Task[bytes] | None = None
+    if body.audio_b64:
+        interpretation = build_interpretation(
+            utterance,
+            _intended_line(state, prev_node_id),
+            asr_ms=_asr_ms(timer),
+            audio_ms=_spoken_ms(body.audio_b64),
+        )
+        stamp_coach(coach_fallback, interpretation)
+        reply_task = _start_reply_speech(interpretation)
     tutor_system = render_prompt("tutor_system.md", {})
     tutor_values = {
         "utterance": utterance,
@@ -705,16 +889,32 @@ async def _session_turn_pipeline(
 
     # Tutor overlaps NPC LLM and TTS. Playback must not wait on the coach note.
     # The pitch advisory overlaps too and is dropped if pronunciation is down.
+    # The spoken interpretation starts here so it overlaps the shop line too.
     coach_gen = _begin_coach(state.id)
     tutor_task = asyncio.create_task(
         _tutor_with_reading(),
         name=f"machi-tutor-{state.id}",
     )
+    if body.audio_b64:
+        note_stage(
+            state.id,
+            "thinking",
+            f"Heard 「{utterance or '…'}」. Choosing the shop's reply.",
+            heard=utterance,
+        )
     try:
         with timer.measure(STAGE_LLM):
             npc_ja = await LLM.npc_reply(
                 system=npc_system, user=npc_user, fallback_line=scripted_ja
             )
+        if body.audio_b64:
+            note_stage(
+                state.id,
+                "speaking",
+                f"Heard 「{utterance or '…'}」. Preparing the spoken reply.",
+                heard=utterance,
+            )
+        coach_audio = b""
         try:
             with timer.measure(STAGE_TTS):
                 cached = cached_npc_wav(settings.assets_path, state.scenario, npc_ja)
@@ -728,6 +928,12 @@ async def _session_turn_pipeline(
                     )
         except SpeechError as exc:
             raise _speech_unavailable(exc) from exc
+        if reply_task is not None:
+            try:
+                coach_audio = await reply_task
+            except SpeechError:
+                logger.exception("interpretation speech failed")
+                coach_audio = b""
         # Let a tutor call that already finished publish before we decide.
         # A still-running tutor stays pending so this response can carry audio.
         await asyncio.sleep(0)
@@ -748,13 +954,16 @@ async def _session_turn_pipeline(
             learner_text=utterance,
             goal_id=goal_for_card,
             hint_climbs=climbs,
+            interpretation=interpretation,
         )
         pitch_advisory = await _finish_pitch_score(score_task)
     except asyncio.CancelledError:
+        _cancel_audio_task(reply_task)
         _cancel_score_task(score_task)
         _cancel_coach_task(tutor_task)
         raise
     except Exception:
+        _cancel_audio_task(reply_task)
         _cancel_score_task(score_task)
         _cancel_coach_task(tutor_task)
         raise
@@ -763,7 +972,7 @@ async def _session_turn_pipeline(
     if node_now.debrief:
         state.phase = PHASE_DEBRIEF
     kind = "debrief" if node_now.debrief else "turn"
-    return _pack_turn(
+    payload = _pack_turn(
         state,
         kind=kind,
         utterance=utterance,
@@ -779,6 +988,11 @@ async def _session_turn_pipeline(
         reset=False,
         pitch_advisory=pitch_advisory,
     )
+    if interpretation is not None:
+        payload["interpretation"] = interpretation
+    if coach_audio:
+        payload["coach_audio_b64"] = base64.b64encode(coach_audio).decode("ascii")
+    return payload
 
 
 async def _tutor_payload(system: str, user: str, fallback: dict[str, Any]) -> dict[str, Any]:
@@ -818,8 +1032,16 @@ def _take_coach(
     learner_text: str,
     goal_id: str,
     hint_climbs: int,
+    interpretation: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Return the tutor payload. Pending means NPC audio ships without waiting."""
+
+    def _with_interpretation(coach: dict[str, Any]) -> dict[str, Any]:
+        if interpretation is None:
+            return coach
+        stamped = dict(coach)
+        stamp_coach(stamped, interpretation)
+        return stamped
 
     def _publish(finished: asyncio.Task[dict[str, Any]]) -> None:
         if COACH_GEN.get(session_id) != gen or finished.cancelled():
@@ -828,7 +1050,7 @@ def _take_coach(
             return
         _accept_coach(
             session_id,
-            finished.result(),
+            _with_interpretation(finished.result()),
             learner_text=learner_text,
             goal_id=goal_id,
             hint_climbs=hint_climbs,
@@ -844,7 +1066,7 @@ def _take_coach(
     PENDING_COACH.pop(session_id, None)
     if task.cancelled() or task.exception() is not None:
         return fallback, False
-    coach = task.result()
+    coach = _with_interpretation(task.result())
     _accept_coach(
         session_id,
         coach,

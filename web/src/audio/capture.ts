@@ -1,3 +1,4 @@
+import { micBlockedReason, readMicPage } from "./micDebug";
 import {
   consumePcmFrames,
   emptyPcmPending,
@@ -16,7 +17,11 @@ export function micErrorMessage(err: unknown): string {
   if (err instanceof DOMException && err.name === "NotAllowedError") {
     return "Microphone permission was denied";
   }
+  if (typeof err === "string" && err === "warmup_incomplete") {
+    return "Hold to speak starts the warm-up. Try the microphone again.";
+  }
   if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err) return err;
   return "Microphone failed";
 }
 
@@ -37,20 +42,25 @@ export class MicCapture {
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private node: AudioWorkletNode | null = null;
+  private sink: GainNode | null = null;
   private pending: PcmPending = emptyPcmPending();
   private frameIndex = 0;
 
   async prepare(): Promise<void> {
-    const hasMic = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
-    if (!micCaptureAvailable(window.isSecureContext, hasMic)) {
-      throw new Error("Microphone needs localhost or HTTPS");
+    const page = readMicPage();
+    const blocked = micBlockedReason(page);
+    if (!micCaptureAvailable(page.secureContext, page.hasGetUserMedia) || blocked) {
+      throw new Error(blocked || "Microphone needs localhost or HTTPS");
     }
+    // Leave the mic raw. Echo cancellation and noise suppression on this
+    // machine can hand back a flat buffer, and a flat buffer is transcribed
+    // as the same word on every hold.
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        channelCount: { ideal: 1 },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
       },
     });
     try {
@@ -94,12 +104,20 @@ export class MicCapture {
       }
     };
     this.source.connect(this.node);
+    // Chrome does not pull an AudioWorklet unless it reaches the destination.
+    // A silent gain keeps process() running without playing the mic back.
+    this.sink = ctx.createGain();
+    this.sink.gain.value = 0;
+    this.node.connect(this.sink);
+    this.sink.connect(ctx.destination);
   }
 
   async stop(): Promise<void> {
     this.node?.disconnect();
+    this.sink?.disconnect();
     this.source?.disconnect();
     this.node = null;
+    this.sink = null;
     this.source = null;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;

@@ -32,6 +32,25 @@ _engine_meta: dict[str, dict[str, str]] = {}
 class SynthesizeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=800)
     voice: str = "qwen3_tts"
+    language: str = "Japanese"
+
+
+# Qwen3-TTS CustomVoice language tags. Anything else stays Japanese.
+_TTS_LANGUAGES = frozenset(
+    {
+        "Auto",
+        "Chinese",
+        "English",
+        "French",
+        "German",
+        "Italian",
+        "Japanese",
+        "Korean",
+        "Portuguese",
+        "Russian",
+        "Spanish",
+    }
+)
 
 
 def _stub_wav(seconds: float = 0.35, hz: int = 440) -> bytes:
@@ -113,7 +132,13 @@ def _speaker_for_engine(engine: str) -> str:
     return "Ono_Anna"
 
 
-def _synthesize_locked(text: str, engine: str) -> tuple[bytes, str]:
+def _tts_language(language: str) -> str:
+    if language in _TTS_LANGUAGES:
+        return language
+    return "Japanese"
+
+
+def _synthesize_locked(text: str, engine: str, language: str = "Japanese") -> tuple[bytes, str]:
     engine = (engine or "stub").strip().lower()
     if engine == "stub":
         return _stub_wav(), "stub"
@@ -124,7 +149,7 @@ def _synthesize_locked(text: str, engine: str) -> tuple[bytes, str]:
         speaker = _speaker_for_engine(engine)
         wavs, sr = _qwen.generate_custom_voice(
             text=text,
-            language="Japanese",
+            language=_tts_language(language),
             speaker=speaker,
         )
         tag = "qwen3_tts" if engine == "qwen3_tts" else f"qwen3_tts_as_{engine}"
@@ -154,7 +179,7 @@ def health() -> dict[str, Any]:
 def synthesize(body: SynthesizeRequest) -> dict[str, Any]:
     try:
         with _lock:
-            audio, engine_used = _synthesize_locked(body.text, body.voice)
+            audio, engine_used = _synthesize_locked(body.text, body.voice, body.language)
     except RuntimeError as exc:
         logger.warning("TTS %s failed (%s); stub", body.voice, exc)
         audio, engine_used = _stub_wav(), "stub"

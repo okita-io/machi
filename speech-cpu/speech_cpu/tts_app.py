@@ -12,6 +12,7 @@ app = FastAPI(title="Machi TTS (CPU stub)", version="0.1.0")
 class SynthesizeRequest(BaseModel):
     text: str
     voice: str = "npc"
+    language: str = "Japanese"
 
 
 def _stub_wav(seconds: float = 0.35, hz: int = 440) -> bytes:

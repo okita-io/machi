@@ -115,6 +115,29 @@ export function consumePcmFrames(
   };
 }
 
+/** Peak and a checksum, so two holds can be told apart before speech recognition. */
+export function pcmClipStats(chunks: Uint8Array[]): {
+  bytes: number;
+  peak: number;
+  checksum: number;
+} {
+  let bytes = 0;
+  let peak = 0;
+  let checksum = 0;
+  for (const frame of chunks) {
+    const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+    const samples = Math.floor(frame.byteLength / 2);
+    bytes += samples * 2;
+    for (let i = 0; i < samples; i++) {
+      const sample = view.getInt16(i * 2, true);
+      const abs = sample < 0 ? -sample : sample;
+      if (abs > peak) peak = abs;
+      checksum = (checksum + (sample & 0xffff)) >>> 0;
+    }
+  }
+  return { bytes, peak, checksum };
+}
+
 /** Join captured Int16 frames into standard base64 for a REST review answer. */
 export function pcmChunksToBase64(chunks: Uint8Array[]): string {
   const total = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);

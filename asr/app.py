@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import base64
-import io
+import hashlib
 import logging
 import os
 import tempfile
 import threading
-import wave
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -16,6 +16,23 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+# NGC PyAV in the 25.01 image rejects metadata_errors; faster-whisper 1.2 passes it.
+try:
+    import av
+
+    _av_open = av.open
+
+    def _open_compat(*args, **kwargs):
+        try:
+            return _av_open(*args, **kwargs)
+        except TypeError:
+            kwargs.pop("metadata_errors", None)
+            return _av_open(*args, **kwargs)
+
+    av.open = _open_compat
+except ImportError:
+    pass
 
 SAMPLE_RATE = 16_000
 
@@ -34,14 +51,48 @@ class TranscribeRequest(BaseModel):
     initial_prompt: str | None = None
 
 
-def _pcm_to_wav(pcm: bytes) -> bytes:
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(pcm)
-    return buf.getvalue()
+def _pcm_samples(data: bytes) -> bytes | None:
+    """Int16 frames for a level check. None when the container is not int16 PCM."""
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        import io
+        import wave
+
+        try:
+            with wave.open(io.BytesIO(data), "rb") as wf:
+                if wf.getsampwidth() != 2 or wf.getnchannels() != 1:
+                    return None
+                return wf.readframes(wf.getnframes())
+        except wave.Error:
+            return None
+    return data
+
+
+def _float_audio(pcm: bytes):
+    """Raw 16 kHz int16 as a float32 waveform the decoder reads directly."""
+    import numpy as np
+
+    from audio_io import pcm_peak
+
+    usable = len(pcm) - (len(pcm) % 2)
+    if usable < 2 or pcm_peak(pcm) == 0:
+        return np.zeros(0, dtype=np.float32)
+    samples = np.frombuffer(pcm[:usable], dtype="<i2").astype(np.float32)
+    return np.ascontiguousarray(samples / 32768.0)
+
+
+def _decode(audio: object, language: str, prompt: str | None, *, vad_filter: bool) -> str:
+    from audio_io import transcript_from_segments
+
+    segments, _info = _model.transcribe(
+        audio,
+        language=language,
+        condition_on_previous_text=False,
+        # Temperature fallback invents a word when the clip is not speech.
+        temperature=0.0,
+        vad_filter=vad_filter,
+        initial_prompt=prompt,
+    )
+    return transcript_from_segments(segments)
 
 
 def _load_model() -> None:
@@ -99,25 +150,73 @@ def transcribe(body: TranscribeRequest) -> dict[str, Any]:
         return {"text": "", "confidence": 0.0, "source": "empty"}
     if _model is None:
         raise HTTPException(status_code=503, detail="model_not_ready")
-    pcm = base64.b64decode(body.audio_b64)
-    if len(pcm) < SAMPLE_RATE // 10 * 2:
-        return {"text": "", "confidence": 0.0, "source": "audio"}
-    wav = _pcm_to_wav(pcm)
-    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
-        tmp.write(wav)
-        tmp.flush()
-        segments, info = _model.transcribe(
-            tmp.name,
-            language=body.language,
-            condition_on_previous_text=False,
-            vad_filter=True,
-            initial_prompt=body.initial_prompt or None,
-        )
-        text = "".join(segment.text for segment in segments).strip()
-    confidence = float(getattr(info, "language_probability", 0.0) or 0.0)
+    raw = base64.b64decode(body.audio_b64)
+    audio_ms = len(raw) // (SAMPLE_RATE // 1000 * 2) if raw else 0
+    clip = hashlib.sha256(raw).hexdigest()[:12]
+    level = _pcm_samples(raw)
+    if len(raw) < SAMPLE_RATE // 10 * 2:
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "source": "audio",
+            "audio_ms": audio_ms,
+            "decode_ms": 0.0,
+            "passes": 0,
+            "clip": clip,
+        }
+    from audio_io import clip_is_silent, needs_unfiltered_decode, pcm_peak
+
+    # A muted clip is not a new utterance. Decoding it always yields 「ごめん」.
+    if level is not None and clip_is_silent(level):
+        logger.info("transcribe clip=%s peak=%s silent", clip, pcm_peak(level))
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "source": "silent",
+            "audio_ms": audio_ms,
+            "decode_ms": 0.0,
+            "passes": 0,
+            "clip": clip,
+            "peak": pcm_peak(level),
+        }
+    started = time.perf_counter()
+    passes = 1
+    is_wav = len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WAVE"
+    if is_wav:
+        wav = raw
+        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+            tmp.write(wav)
+            tmp.flush()
+            text = _decode(tmp.name, body.language, body.initial_prompt, vad_filter=True)
+            if needs_unfiltered_decode(text, len(level or raw)):
+                passes = 2
+                text = _decode(tmp.name, body.language, body.initial_prompt, vad_filter=False)
+    else:
+        # Browser push-to-talk is raw 16 kHz PCM. Pass those samples in memory
+        # so this request cannot be decoded from a previous file.
+        audio = _float_audio(raw)
+        text = _decode(audio, body.language, body.initial_prompt, vad_filter=True)
+        if needs_unfiltered_decode(text, len(raw)):
+            passes = 2
+            text = _decode(audio, body.language, body.initial_prompt, vad_filter=False)
+    decode_ms = (time.perf_counter() - started) * 1000.0
+    logger.info(
+        "transcribe clip=%s audio_ms=%s peak=%s decode_ms=%.1f passes=%s text=%r",
+        clip,
+        audio_ms,
+        pcm_peak(level or b""),
+        decode_ms,
+        passes,
+        text,
+    )
     return {
         "text": text,
-        "confidence": confidence,
+        "confidence": 1.0 if text else 0.0,
         "source": "audio",
         "engine": _engine,
+        "audio_ms": audio_ms,
+        "decode_ms": round(decode_ms, 1),
+        "passes": passes,
+        "clip": clip,
+        "peak": pcm_peak(level or b""),
     }

@@ -218,7 +218,7 @@ def test_pitch_advisory_does_not_change_stars(monkeypatch):
             ],
         }
 
-    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+    async def fake_synthesize(text: str, voice: str = "npc", **_extra: object) -> bytes:
         del text, voice
         return b"RIFF"
 

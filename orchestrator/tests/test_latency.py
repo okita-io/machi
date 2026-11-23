@@ -45,7 +45,7 @@ def test_turn_latency_records_stages_skips_as_null_and_emits(caplog):
 
 
 def test_text_turn_omits_asr_header_and_logs_null(caplog):
-    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+    async def fake_synthesize(text: str, voice: str = "npc", **_extra: object) -> bytes:
         return b"RIFF"
 
     with (
@@ -83,7 +83,7 @@ def test_audio_turn_records_asr_header():
     ) -> str:
         return "ふたりです"
 
-    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+    async def fake_synthesize(text: str, voice: str = "npc", **_extra: object) -> bytes:
         return b"RIFF"
 
     audio_b64 = base64.b64encode(b"\x00\x01").decode("ascii")

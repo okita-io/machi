@@ -58,7 +58,109 @@ docker compose --env-file .env --profile rtx3090 up
 docker compose --env-file .env.spark --profile spark up
 ```
 
-`GPU_MEM_FRACTION` (default 0.40, use ≤ 0.35 on Spark), `ASR_ENGINE`, and `GPU_BASE` are the speech knobs. `SPEECH_PROFILE` selects a row in `voices/voices.yaml`. GPU services are **stubbed** in this scaffold; wire Qwen3-ASR / TTS per `docs/SPEC.md`.
+`GPU_MEM_FRACTION` (default 0.40, use ≤ 0.35 on Spark), `ASR_ENGINE`, and `GPU_BASE` are the speech knobs. `SPEECH_PROFILE` selects a row in `voices/voices.yaml`. The `rtx3090` profile runs kotoba-whisper ASR and Qwen3-TTS. The `cpu` profile is the stub demo.
+
+## Restart and rebuild
+
+Every `docker compose` command needs the same `--profile` flags (and `--env-file`, on the GPU hosts) that started the stack. A command without those profiles does not see the containers. `make down` only stops the **cpu** profile.
+
+| Profile | Start | Stop |
+| --- | --- | --- |
+| CPU demo | `docker compose --profile cpu up -d --build` | `docker compose --profile cpu down` |
+| RTX 3090 | `docker compose --env-file .env --profile rtx3090 up -d --build` | `docker compose --env-file .env --profile rtx3090 down` |
+| 3090 + phone mic | `docker compose --env-file .env --profile rtx3090 --profile https up -d --build` | `docker compose --env-file .env --profile rtx3090 --profile https down` |
+
+`make up-cpu`, `make up-rtx3090`, and `make up-rtx3090-https` are the same starts in the foreground, with a rebuild. HTTPS needs `./scripts/make_lan_https.sh` first so `.certs/` exists. Copy `.env.example` or `.env.rtx3090.example` to `.env` before the first start.
+
+Omit `-d` when you want the logs in that terminal. Otherwise follow them with `docker compose ... logs -f orchestrator` (add the same `--env-file` and `--profile` flags).
+
+### Which container to recreate
+
+| You changed | Recreate | Leave running |
+| --- | --- | --- |
+| `web/` | `web`, and `web-https` when the `https` profile is up. They share the `machi-web:local` image | `orchestrator`, `asr`, `tts`, `pron` |
+| `orchestrator/` | `orchestrator` | `asr`, `tts`. Reloading those models is slow and unnecessary |
+| `asr/` or `ASR_ENGINE` | `asr` | `tts` |
+| `tts/` | `tts` | `asr` |
+| `pron/` | `pron` | speech containers |
+| `scenarios/*.yaml` | Restart `orchestrator` only. Scenarios are read when that process starts; the directory is a bind mount, so the image does not need a rebuild | speech containers |
+| `assets/` (images, baked wavs) | Nothing. The web server and the orchestrator read the mount on each request. Hard-refresh the browser so it drops a cached image | |
+| `voices/voices.yaml` | Nothing if the file's modification time changed; the orchestrator reloads the catalog from that. Restart `orchestrator` if a turn is still on the old speaker | |
+| `.env` | Recreate `orchestrator`. Also recreate `asr` when `ASR_ENGINE` or `GPU_MEM_FRACTION` changed, and `tts` when `GPU_MEM_FRACTION` changed | |
+
+`web` is the UI on port **5173**. `web-https` is the same UI with the self-signed certificate on **5174**. `orchestrator` is the API on **8100**. `asr` is **8101**, `tts` is **8102**, `pron` is **8103**, `assets` is **8080**. The CPU profile uses `asr-cpu` and `tts-cpu` on 8101 and 8102 instead of `asr` and `tts`.
+
+The orchestrator keeps sessions in memory. Recreating it drops the visit you had open. Hard-refresh the page (the new web bundle is a different filename, and the old session id will 404).
+
+The first `asr` or `tts` start downloads weights into the `hf-cache` volume and can take several minutes. Later recreates still wait until `/health` answers before you talk. An orchestrator or web rebuild does not need that wait.
+
+### Rebuild one service and leave the others up
+
+`--no-deps` keeps Compose from recreating containers this service depends on. `--build` rebuilds the image. Drop `--build` when only `.env` or a bind-mounted file changed, and add `--force-recreate` so the container picks up new environment variables.
+
+3090 + HTTPS, after an orchestrator or web edit:
+
+```bash
+docker compose --env-file .env --profile rtx3090 --profile https up -d --build --no-deps orchestrator web web-https
+```
+
+Web only:
+
+```bash
+docker compose --env-file .env --profile rtx3090 --profile https up -d --build --no-deps web web-https
+```
+
+Speech, one at a time:
+
+```bash
+docker compose --env-file .env --profile rtx3090 up -d --build --no-deps asr
+docker compose --env-file .env --profile rtx3090 up -d --build --no-deps tts
+docker compose --env-file .env --profile rtx3090 up -d --build --no-deps pron
+```
+
+CPU demo, orchestrator and web only:
+
+```bash
+docker compose --profile cpu up -d --build --no-deps orchestrator web
+```
+
+Restart a container without an image rebuild (scenario YAML, or `.env` after `--force-recreate`):
+
+```bash
+docker compose --env-file .env --profile rtx3090 --profile https up -d --no-deps --force-recreate orchestrator
+```
+
+### Speech URLs inside Compose
+
+`ASR_URL` and `TTS_URL` in `.env` must be the Compose DNS names, `http://asr:8101` and `http://tts:8102` (CPU demo: `http://asr-cpu:8101` and `http://tts-cpu:8102`). Compose substitutes a shell variable over the env file. If the shell has `TTS_URL=http://127.0.0.1:8102` from a host-side script, the orchestrator container calls itself and returns the stub voice.
+
+Clear it in the same shell you use for Compose, then confirm the container:
+
+```bash
+unset TTS_URL ASR_URL
+docker compose --env-file .env --profile rtx3090 --profile https exec orchestrator printenv TTS_URL
+```
+
+PowerShell:
+
+```powershell
+Remove-Item Env:TTS_URL,Env:ASR_URL -ErrorAction SilentlyContinue
+docker compose --env-file .env --profile rtx3090 --profile https exec orchestrator printenv TTS_URL
+```
+
+The printed value is `http://tts:8102`. Host scripts such as `scripts/e2e_live_speech.py` and `scripts/bake_npc_audio.py` still use `http://127.0.0.1:8101` and `http://127.0.0.1:8102`, because those run outside the compose network.
+
+### Check that it came back
+
+```bash
+docker compose --env-file .env --profile rtx3090 --profile https ps
+curl -s http://127.0.0.1:8100/health
+curl -s http://127.0.0.1:8101/health
+curl -s http://127.0.0.1:8102/health
+curl -s http://127.0.0.1:8103/health
+```
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) on this machine, or `https://<tailscale-ip>:5174` for the mic. `health` on the orchestrator should report `"status": "ok"`. ASR and TTS stay unhealthy until their models have loaded.
 
 ## Development without Docker
 
@@ -183,6 +285,23 @@ ASR_URL=http://127.0.0.1:8101 python -m pytest -m accent orchestrator/tests/test
 
 Each WAV is posted to `{ASR_URL}/v1/transcribe`. The score is word error rate on cutlet romaji tokens, so a kanji line and its kana reading can match. The test fails when mean WER is above **0.35**. The speech-cpu mock returns `ふたりです` for every clip and fails that bar. A default `pytest` deselects `accent`; it still checks that the checked-in WAVs are small 16 kHz mono PCM16 and that every expected line is in the ramen scenario.
 
+### Live speech proof
+
+`scripts/e2e_live_speech.py` uses those same clips against a running orchestrator, ASR, and TTS. It checks that audio is sent, that ASR decodes it, and that the reply is playable WAV:
+
+- every clip goes to `POST {ASR_URL}/v1/transcribe` as a WAV (mean romaji WER ≤ 0.35)
+- `futari_desu.wav` and `omizu_kudasai.wav` go to `POST /sessions/{id}/turn` as raw 16 kHz PCM16 (the browser path). The turn must return `learner_text`, `X-Latency-ASR`, and an NPC WAV that is not the 0.35 s stub beep. `ふたりです` must hit `party_size`
+- the same party-size clip is streamed on `/ws/{id}` as 20 ms binary frames (`audio_start` → frames → `audio_stop` → `turn`)
+- `POST {TTS_URL}/v1/synthesize` must return a Qwen WAV longer than 0.8 s
+
+```bash
+python scripts/e2e_live_speech.py
+# or
+pytest -m e2e_live orchestrator/tests/test_e2e_live_speech.py
+```
+
+The script writes `data/e2e_live_report.json` (gitignored) and exits 1 on any failed check. A default `pytest` only runs the offline fixture checks in that file. The GPU ASR accepts either a WAV container or raw PCM16 so both this harness and the browser frames work.
+
 ### Baked NPC lines
 
 `scripts/bake_npc_audio.py` writes `assets/audio/{scenario_id}/{node_id}.wav` and a `manifest.json` for every fixed `npc` line. The restaurant files in git are CPU stub wavs. Start the TTS stub, then regenerate:
@@ -242,7 +361,7 @@ docker-compose.yml
 | Hands-free | Silero VAD + silence heuristic (500 ms ceiling). Smart Turn v3 optional |
 | Barge-in | New capture stops playback; `audio_start` or `turn` cancels the in-flight server turn |
 | ASR / TTS (CPU) | Mock / stub WAV. Fixed NPC lines in `assets/audio/` play from disk when the spoken text still matches the scenario; other lines use live TTS |
-| ASR / TTS (GPU) | Health stubs |
+| ASR / TTS (GPU) | `rtx3090`: kotoba-whisper on `asr` and Qwen3-TTS on `tts`. `spark`: Qwen3-ASR when that profile is the speech host. Fixed NPC lines still play from `assets/audio/` when the text matches |
 | Pronunciation | CPU `pron` service when `PRON_URL` is set. Expected reading goes to Sora. F0 advice is stored and shown; it does not change stars. Unset `PRON_URL` skips the call |
 | LLM | Live when `LLM_BASE_URL` set; else mock |
 | Lip flap and hint ladder | In the scene |

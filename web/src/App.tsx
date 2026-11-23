@@ -1,12 +1,15 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { playNpcAudio } from "./audio/playback";
+import { formatMicDebug } from "./audio/micDebug";
+import { interpretationClip, playNpcAudio, playSpeech, speechClips } from "./audio/playback";
 import { useMic } from "./audio/useMic";
 import {
   answerReview,
   createSession,
   enrollReviews,
   fetchCoach,
+  fetchTurnActivity,
   listScenarios,
+  sendAudioTurn,
   sendTurn,
   startReviewSession,
   synthesizeSpeech,
@@ -16,6 +19,7 @@ import {
   type ReviewSessionView,
   type ScenarioSummary,
   type SessionStart,
+  type TurnActivity,
   type TurnResult,
 } from "./api";
 import { expressionFromCoach } from "./coach";
@@ -89,6 +93,29 @@ function SubtitleLine({
   );
 }
 
+function micButtonLabel(
+  recording: boolean,
+  sending: boolean,
+  activity: TurnActivity | null,
+): string {
+  if (recording) return "Release to send";
+  if (!sending) return "Hold to speak";
+  switch (activity?.state) {
+    case "transcribing":
+      return "Transcribing…";
+    case "thinking":
+      return "Choosing a reply…";
+    case "speaking":
+      return "Speaking…";
+    case "scoring":
+      return "Checking the phrase…";
+    case "done":
+      return "Heard";
+    default:
+      return "Sending…";
+  }
+}
+
 function starGlyphs(count: number): string {
   return "★".repeat(count) + "☆".repeat(Math.max(0, 3 - count));
 }
@@ -116,6 +143,10 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [goals, setGoals] = useState<string[]>([]);
   const [handsFree, setHandsFree] = useState(false);
+  const [activity, setActivity] = useState<TurnActivity | null>(null);
+  const [sessionEpoch, setSessionEpoch] = useState(0);
+  const [replyAudio, setReplyAudio] = useState<{ text: string; wav: string } | null>(null);
+  const [repeating, setRepeating] = useState(false);
   const [ladder, setLadder] = useState<HintLadderState | null>(null);
   const [hintEpoch, setHintEpoch] = useState(0);
   const [mouth, setMouth] = useState<MouthFrame>("closed");
@@ -135,6 +166,8 @@ export default function App() {
   const reviewIdRef = useRef<string | null>(null);
   const hintMaxRef = useRef<Record<string, number>>({});
   const sessionIdRef = useRef<string | null>(null);
+  const recoveringRef = useRef(false);
+  const expectBytesRef = useRef(0);
 
   hintMaxRef.current = ladder?.hintMax ?? {};
   sessionIdRef.current = session?.session_id ?? null;
@@ -147,8 +180,10 @@ export default function App() {
   const applyTurn = useCallback(
     (result: TurnResult) => {
       const kind = turnKind(result);
-      // Start NPC audio before coach state. A pending note must not delay playback.
-      if (result.tts_audio_b64) playNpcAudio(result.tts_audio_b64, onMouth);
+      // Start audio before coach state. A pending note must not delay playback.
+      // The shop line plays first. Sora then speaks the interpretation.
+      const clips = speechClips(result.tts_audio_b64, result.coach_audio_b64);
+      if (clips.length) playSpeech(clips, onMouth);
       if (result.learner_text) setLearner(result.learner);
       if (result.npc?.ja) setNpc(result.npc);
       if (result.reset) {
@@ -160,6 +195,7 @@ export default function App() {
         setWarmupIndex(0);
         setCoach(null);
         setCoachPending(false);
+        setReplyAudio(null);
         setMouth("closed");
         setHintEpoch(0);
         setLadder((prev) =>
@@ -172,6 +208,9 @@ export default function App() {
       if (result.pitch_advisory?.is_advisory) {
         setPitchAdvisory(result.pitch_advisory);
       }
+      const spoken = interpretationClip(kind, result.tts_audio_b64, result.coach_audio_b64);
+      const spokenText = (result.coach?.coach_note_en || "").trim();
+      if (spoken && spokenText) setReplyAudio({ text: spokenText, wav: spoken });
       if (kind === "warmup") {
         const done = Boolean(result.warmup_complete) || result.phase === "roleplay";
         setPhase(done ? "roleplay" : "warmup");
@@ -213,6 +252,46 @@ export default function App() {
     [onMouth],
   );
 
+  const onSessionLost = useCallback(() => {
+    if (recoveringRef.current) return;
+    recoveringRef.current = true;
+    setSessionEpoch((n) => n + 1);
+  }, []);
+
+  const onClipStart = useCallback((bytes?: number) => {
+    expectBytesRef.current = bytes && bytes > 0 ? bytes : 0;
+    setActivity({
+      state: "received",
+      detail:
+        bytes && bytes > 0
+          ? `Sending ${bytes} bytes. Waiting for this clip to be transcribed.`
+          : "Recording a new clip. Release to transcribe it.",
+      heard: "",
+      audio_bytes: bytes ?? 0,
+      audio_ms: 0,
+      interpreted: "",
+      pronounce: "",
+    });
+  }, []);
+
+  const onAudioFallback = useCallback(
+    async (audioB64: string) => {
+      const id = sessionIdRef.current;
+      if (!id) throw new Error("No session");
+      try {
+        applyTurn(await sendAudioTurn(id, audioB64, hintMaxRef.current));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "";
+        if (/not found|404/i.test(message)) {
+          onSessionLost();
+          throw new Error("The session ended before this clip could be transcribed.");
+        }
+        throw err;
+      }
+    },
+    [applyTurn, onSessionLost],
+  );
+
   const reviewActive = route === "town" && review !== null && !review.complete;
   const onReviewAudio = useCallback(async (audioB64: string) => {
     const id = reviewIdRef.current;
@@ -235,7 +314,43 @@ export default function App() {
     hintMaxRef,
     reviewActive,
     onReviewAudio,
+    onSessionLost,
+    onClipStart,
+    onAudioFallback,
   );
+
+  useEffect(() => {
+    const sessionId = session?.session_id;
+    if (!sessionId || !mic.sending) return;
+    let ignore = false;
+    const tick = async () => {
+      try {
+        const body = await fetchTurnActivity(sessionId);
+        if (ignore) return;
+        const expect = expectBytesRef.current;
+        // A finished status from the previous clip is not this recording.
+        if (expect > 0 && body.audio_bytes !== expect && body.state === "done") return;
+        if (expect > 0 && body.audio_bytes === expect) expectBytesRef.current = 0;
+        setActivity(body);
+      } catch {
+        // Keep the last status. The next poll retries.
+      }
+    };
+    void tick();
+    const handle = window.setInterval(() => void tick(), 1000);
+    return () => {
+      ignore = true;
+      window.clearInterval(handle);
+      void fetchTurnActivity(sessionId)
+        .then((body) => {
+          const expect = expectBytesRef.current;
+          if (expect > 0 && body.audio_bytes !== expect && body.state === "done") return;
+          if (expect > 0 && body.audio_bytes === expect) expectBytesRef.current = 0;
+          setActivity(body);
+        })
+        .catch(() => undefined);
+    };
+  }, [session?.session_id, mic.sending]);
 
   useEffect(() => {
     let cancel = false;
@@ -258,11 +373,24 @@ export default function App() {
       setPitchAdvisory(null);
       setLadder(createHintLadder(level, s.node_expects?.[0] ?? ""));
       setHintEpoch(0);
+      recoveringRef.current = false;
+      if (sessionEpoch > 0) {
+        setActivity({
+          state: "error",
+          detail:
+            "The previous session ended on the server, so that recording was not transcribed. This is a new session. Hold to speak again.",
+          heard: "",
+          audio_bytes: 0,
+          audio_ms: 0,
+          interpreted: "",
+          pronounce: "",
+        });
+      }
     })();
     return () => {
       cancel = true;
     };
-  }, [level, scenarioId]);
+  }, [level, scenarioId, sessionEpoch]);
 
   useEffect(() => {
     if (route !== "town") return;
@@ -399,6 +527,26 @@ export default function App() {
   function onHelp() {
     setLadder((prev) => (prev ? reduceHintLadder(prev, { type: "help" }) : prev));
     setHintEpoch((n) => n + 1);
+  }
+
+  async function onRepeat() {
+    const shown = [activity?.interpreted, activity?.pronounce].filter(Boolean).join(" ").trim();
+    if (!shown) return;
+    if (replyAudio?.text === shown) {
+      playNpcAudio(replyAudio.wav, onMouth);
+      return;
+    }
+    setRepeating(true);
+    setHintError(null);
+    try {
+      const wav = await synthesizeSpeech(shown, "guide");
+      setReplyAudio({ text: shown, wav });
+      playNpcAudio(wav, onMouth);
+    } catch {
+      setHintError("Couldn't play that line.");
+    } finally {
+      setRepeating(false);
+    }
   }
 
   async function onHear(text: string) {
@@ -634,6 +782,30 @@ export default function App() {
             <SubtitleLine role="npc" label="Staff" line={npc} level={level} />
           </div>
         )}
+        {activity && activity.state !== "idle" ? (
+          <div className="turn-status" data-state={activity.state} role="status">
+            {activity.state === "done" && (activity.interpreted || activity.pronounce) ? (
+              <>
+                {activity.interpreted ? (
+                  <span className="interpreted">{activity.interpreted}</span>
+                ) : null}
+                {activity.pronounce ? (
+                  <span className="pronounce">{activity.pronounce}</span>
+                ) : null}
+                <button
+                  type="button"
+                  className="repeat"
+                  disabled={repeating}
+                  onClick={() => void onRepeat()}
+                >
+                  {repeating ? "…" : "Repeat"}
+                </button>
+              </>
+            ) : (
+              activity.detail
+            )}
+          </div>
+        ) : null}
       </div>
       <aside className="coach" aria-live="polite">
         <h2>Sora · coach</h2>
@@ -680,7 +852,11 @@ export default function App() {
             type="button"
             className={mic.recording ? "mic-button live" : "mic-button"}
             aria-pressed={mic.recording}
-            disabled={!talking || !mic.ready || ((busy || mic.sending) && !mic.recording)}
+            disabled={
+              phase === "debrief" ||
+              Boolean(mic.debug.blockedReason) ||
+              ((busy || mic.sending) && !mic.recording)
+            }
             onPointerDown={(e) => {
               e.preventDefault();
               e.currentTarget.setPointerCapture(e.pointerId);
@@ -694,7 +870,7 @@ export default function App() {
             }}
             onPointerCancel={() => mic.holdEnd()}
           >
-            {mic.recording ? "Release to send" : "Hold to talk"}
+            {micButtonLabel(mic.recording, mic.sending, activity)}
           </button>
           <label className="mic-check">
             <input
@@ -708,12 +884,24 @@ export default function App() {
             {mic.error
               ? mic.error
               : mic.recording
-                ? `Listening… ${mic.frames} frames`
-                : mic.ready
-                  ? "16 kHz · push-to-talk"
+                ? `Listening… ${mic.debug.localFrames} frames captured, ${mic.frames} acked`
+                : activity && activity.state !== "idle"
+                  ? activity.detail
+                  : mic.ready
+                  ? phase === "briefing"
+                    ? "Hold to speak. Your voice is transcribed and starts the warm-up."
+                    : "Hold to speak. Your voice is sent to speech recognition."
                   : "Connecting microphone channel…"}
           </p>
         </div>
+        <details
+          className="mic-debug"
+          open
+          data-blocked={mic.debug.blockedReason ? "true" : "false"}
+        >
+          <summary>Mic debug</summary>
+          <pre>{formatMicDebug(mic.debug)}</pre>
+        </details>
         <button type="submit" disabled={!talking || busy || mic.sending || mic.recording}>
           {busy || mic.sending ? "…" : "Send turn"}
         </button>

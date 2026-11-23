@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+import unicodedata
 
 logger = logging.getLogger(__name__)
 
@@ -161,5 +162,41 @@ def _token_ruby(surface: str, reading: str | None) -> str:
     return f"<ruby>{escaped}<rt>{html.escape(reading)}</rt></ruby>"
 
 
+_PUNCT = re.compile(r"[、。！？!?.,「」『』（）()・\s]+")
+
+
+def fold_spoken(text: str) -> str:
+    """NFKC plus the counter forms ASR writes as digits (``2人`` → ``二人``)."""
+    folded = unicodedata.normalize("NFKC", text or "")
+    folded = re.sub(r"(?<![0-9])2人", "二人", folded)
+    folded = re.sub(r"(?<![0-9])1人", "一人", folded)
+    folded = re.sub(r"(?<![0-9])1つ", "一つ", folded)
+    return folded.strip()
+
+
+def tokenize_words(text: str) -> list[tuple[str, str]]:
+    """Content words as ``(surface, hiragana)``. Punctuation is dropped.
+
+    Without fugashi the whole line is one word, so coaching still has a phrase
+    to compare.
+    """
+    folded = fold_spoken(text)
+    if not folded:
+        return []
+    tagger = _get_tagger()
+    if tagger is None:
+        cleaned = _PUNCT.sub("", folded)
+        return [(cleaned, cleaned)] if cleaned else []
+    words: list[tuple[str, str]] = []
+    for word in tagger(folded):  # type: ignore[operator]
+        surface = str(getattr(word, "surface", "") or "")
+        if not surface or _PUNCT.fullmatch(surface):
+            continue
+        reading = _hiragana_reading(word) or surface
+        words.append((surface, reading))
+    return words
+
+
 def _normalize(s: str) -> str:
-    return "".join(s.split()).lower()
+    """Compare form: folded counters, no punctuation."""
+    return _PUNCT.sub("", fold_spoken(s)).lower()

@@ -1,5 +1,6 @@
 """Briefing gate, warm-up, and the debrief screen payload."""
 
+import base64
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -18,6 +19,51 @@ PAIRS = [
     ("A short thanks is enough.", "ありがとうございます"),
     ("Offer the card.", "カードで大丈夫ですか"),
 ]
+
+
+def test_spoken_audio_during_briefing_is_transcribed():
+    spoken_lines: list[tuple[str, str, str | None]] = []
+
+    async def fake_transcribe(
+        audio_pcm: bytes | None = None,
+        text_override: str | None = None,
+    ) -> str:
+        del text_override
+        assert audio_pcm
+        return "ふたりです"
+
+    async def fake_synthesize(
+        text: str,
+        voice: str = "npc",
+        language: str | None = None,
+    ) -> bytes:
+        spoken_lines.append((text, voice, language))
+        return b"RIFF"
+
+    with (
+        patch("machi.main.transcribe", new=AsyncMock(side_effect=fake_transcribe)),
+        patch("machi.main.synthesize", new=AsyncMock(side_effect=fake_synthesize)),
+        TestClient(app) as client,
+    ):
+        created = client.post(
+            "/sessions",
+            json={"scenario_id": "restaurant_ramen_01", "level": 1},
+        )
+        sid = created.json()["session_id"]
+        audio_b64 = base64.b64encode(b"\x00\x00" * 1600).decode("ascii")
+        spoken = client.post(f"/sessions/{sid}/turn", json={"audio_b64": audio_b64})
+        assert spoken.status_code == 200, spoken.text
+        body = spoken.json()
+        assert body["learner_text"] == "ふたりです"
+        assert body["phase"] == "warmup"
+        assert body["tts_audio_b64"] == base64.b64encode(b"RIFF").decode("ascii")
+        assert spoken_lines
+        text, voice, language = spoken_lines[0]
+        assert "Heard" in text
+        assert "Pronounce it" in text
+        assert "ふたりです" in text
+        assert voice == "irodori"
+        assert language == "Auto"
 
 
 def test_stars_follow_climbs_above_the_level_default():

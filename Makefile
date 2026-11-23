@@ -1,4 +1,4 @@
-.PHONY: up-cpu up-rtx3090 up-rtx3090-https down test lint e2e-latency
+.PHONY: up-cpu up-rtx3090 up-rtx3090-https down test lint e2e-latency e2e-live
 
 up-cpu:
 	docker compose --profile cpu up --build
@@ -24,3 +24,7 @@ lint:
 # In-process orchestrator + speech-cpu stubs. REAL=1 asserts p95 < 2s.
 e2e-latency:
 	python scripts/e2e_latency.py
+
+# Live 3090/Spark stack. Posts tests/fixtures/asr clips and writes data/e2e_live_report.json.
+e2e-live:
+	python scripts/e2e_live_speech.py

@@ -7,6 +7,7 @@ import {
   FRAME_BYTES,
   FRAME_SAMPLES,
   pcmChunksToBase64,
+  pcmClipStats,
   pcmFrameLogEnabled,
   sliceFloat32ToInt16Frames,
 } from "./pcm.ts";
@@ -94,6 +95,15 @@ test("pcm chunks become standard base64", () => {
   const bytes = new Uint8Array([0, 1, 2, 255]);
   assert.equal(pcmChunksToBase64([bytes.subarray(0, 2), bytes.subarray(2)]), "AAEC/w==");
   assert.equal(pcmChunksToBase64([]), "");
+});
+
+test("clip stats tell two recordings apart", () => {
+  const quiet = pcmClipStats([new Uint8Array([0, 0, 0, 0])]);
+  const loud = pcmClipStats([new Uint8Array([0, 1, 0, 0])]);
+  assert.equal(quiet.peak, 0);
+  assert.equal(loud.peak, 256);
+  assert.equal(loud.bytes, 4);
+  assert.notEqual(quiet.checksum, loud.checksum);
 });
 
 test("worklet source registers the capture processor", () => {

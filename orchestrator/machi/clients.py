@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 from typing import Any
 
@@ -39,18 +40,37 @@ async def transcribe(audio_pcm: bytes | None = None, text_override: str | None =
         async with httpx.AsyncClient(timeout=30.0) as client:
             r = await client.post(url, json=payload)
             r.raise_for_status()
-            text = r.json().get("text", "")
+            payload = r.json()
+            text = payload.get("text", "")
+            digest = hashlib.sha256(audio_pcm).hexdigest()[:8] if audio_pcm else ""
+            logging.getLogger("uvicorn.error").info(
+                "asr bytes=%s clip=%s audio_ms=%s passes=%s peak=%s text=%r",
+                len(audio_pcm or b""),
+                digest,
+                payload.get("audio_ms"),
+                payload.get("passes"),
+                payload.get("peak"),
+                text if isinstance(text, str) else "",
+            )
     except httpx.HTTPError as exc:
         raise SpeechError("asr") from exc
     return text if isinstance(text, str) else ""
 
 
-async def synthesize(text: str, voice: str = "npc") -> bytes:
-    """POST the NPC line to ``TTS_URL`` ``/v1/synthesize`` and return WAV bytes."""
+async def synthesize(text: str, voice: str = "npc", *, language: str | None = None) -> bytes:
+    """POST a line to ``TTS_URL`` ``/v1/synthesize`` and return WAV bytes.
+
+    ``language`` is optional. NPC lines leave it unset so the service stays on
+    Japanese. The interpretation reply passes ``Auto`` so English coaching and
+    the Japanese phrase can share one clip.
+    """
     url = f"{settings.tts_url.rstrip('/')}/v1/synthesize"
+    payload: dict[str, str] = {"text": text, "voice": voice}
+    if language:
+        payload["language"] = language
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            r = await client.post(url, json={"text": text, "voice": voice})
+            r = await client.post(url, json=payload)
             r.raise_for_status()
             b64 = r.json().get("audio_b64")
     except httpx.HTTPError as exc:

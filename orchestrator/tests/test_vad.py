@@ -105,7 +105,7 @@ def _session(client: TestClient) -> str:
 
 
 def _patches():
-    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+    async def fake_synthesize(text: str, voice: str = "npc", **_extra: object) -> bytes:
         del text, voice
         return b"RIFF"
 

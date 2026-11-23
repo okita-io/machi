@@ -1,7 +1,7 @@
 """Default pytest runs skip live speech markers.
 
-``e2e_latency`` and ``accent`` stay out of ``pytest`` / CI unless the command
-selects them (``pytest -m e2e_latency`` or ``pytest -m accent``).
+``e2e_latency``, ``accent``, and ``e2e_live`` stay out of ``pytest`` / CI unless
+the command selects them (``pytest -m e2e_latency`` or ``pytest -m accent``).
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from machi.config import settings
 
 _REPO = Path(__file__).resolve().parents[2]
 
-_LIVE = ("e2e_latency", "accent")
+_LIVE = ("e2e_latency", "accent", "e2e_live")
 
 
 @pytest.fixture(autouse=True)
@@ -46,6 +46,10 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         "accent: beginner-phrase ASR fixtures; skipped unless ASR_URL answers /health",
+    )
+    config.addinivalue_line(
+        "markers",
+        "e2e_live: fixture clips through live ASR, orchestrator, and TTS",
     )
     config.addinivalue_line(
         "markers",

@@ -43,6 +43,7 @@ testpaths = ["tests"]
 markers = [
   "e2e_latency: spoken-turn latency against orchestrator and speech services",
   "accent: beginner-phrase ASR fixtures; skipped unless ASR_URL answers /health",
+  "e2e_live: fixture clips through live ASR, orchestrator, and TTS",
   "pron_model: OpenJTalk dictionary and librosa.pyin; skip if the dictionary is missing",
 ]
 

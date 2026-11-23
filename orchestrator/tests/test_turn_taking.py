@@ -170,7 +170,7 @@ def test_push_to_talk_websocket_does_not_call_vad_or_scorer():
         ceiling_ms=500,
     )
 
-    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+    async def fake_synthesize(text: str, voice: str = "npc", **_extra: object) -> bytes:
         del text, voice
         return b"RIFF"
 

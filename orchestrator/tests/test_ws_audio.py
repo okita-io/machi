@@ -21,7 +21,7 @@ def test_pcm_frame_is_20ms_int16():
 
 
 def test_ws_typed_turn_still_works():
-    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+    async def fake_synthesize(text: str, voice: str = "npc", **_extra: object) -> bytes:
         return b"RIFF"
 
     transcribe = AsyncMock(return_value="ふたりです")
@@ -46,7 +46,7 @@ def test_ws_typed_turn_still_works():
 
 
 def test_ws_pcm_frames_acked_and_start_stop():
-    async def fake_synthesize(text: str, voice: str = "npc") -> bytes:
+    async def fake_synthesize(text: str, voice: str = "npc", **_extra: object) -> bytes:
         return b"RIFF"
 
     async def fake_transcribe(

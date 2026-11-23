@@ -75,15 +75,19 @@ header h1 {
 
 .scene-column {
   position: relative;
+  display: grid;
+  grid-template-rows: minmax(420px, 1fr) auto;
+  gap: 0.5rem;
   min-height: 420px;
   height: 100%;
+  align-content: start;
 }
 
 .stage {
   position: relative;
   border-radius: 12px;
   background: #161616;
-  min-height: 420px;
+  min-height: 0;
   height: 100%;
   border: 1px solid #333;
   overflow: hidden;
@@ -113,6 +117,7 @@ header h1 {
 .stage:has(.flow-panel) .guide-slot {
   right: 2%;
   height: 58%;
+  z-index: 0;
 }
 
 .guide {
@@ -340,13 +345,19 @@ header h1 {
 }
 
 .subtitle {
-  position: absolute;
-  left: 1rem;
-  right: 1rem;
-  bottom: 1rem;
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  max-width: min(36%, 21rem);
+  justify-self: start;
   background: rgba(0, 0, 0, 0.72);
   padding: 0.75rem 1rem;
   border-radius: 8px;
+}
+
+/* When no briefing panel, subtitles can use the full stage width. */
+.scene-column:not(:has(.flow-panel)) .subtitle {
+  max-width: none;
 }
 
 .subtitle-line + .subtitle-line {
@@ -643,6 +654,7 @@ header h1 {
     height: auto;
     min-height: 0;
     align-self: start;
+    grid-template-rows: auto auto;
   }
 
   .stage {
@@ -663,12 +675,8 @@ header h1 {
     height: 52%;
   }
 
-  .subtitle {
-    position: static;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    margin-top: 0.6rem;
+  .scene-column:has(.flow-panel) .subtitle {
+    max-width: min(48%, 15.5rem);
   }
 
   .app:not(.town-mode) .input-bar {

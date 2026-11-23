@@ -1,0 +1,10 @@
+{
+  "scenario_id": "coin_laundry_01",
+  "voice": "qwen3_tts",
+  "lines": {
+    "greet": "greet.wav",
+    "which": "which.wav",
+    "coins": "coins.wav",
+    "start": "start.wav"
+  }
+}

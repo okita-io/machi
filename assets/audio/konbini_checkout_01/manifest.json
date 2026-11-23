@@ -1,0 +1,10 @@
+{
+  "scenario_id": "konbini_checkout_01",
+  "voice": "qwen3_tts",
+  "lines": {
+    "greet": "greet.wav",
+    "heat": "heat.wav",
+    "points": "points.wav",
+    "pay": "pay.wav"
+  }
+}

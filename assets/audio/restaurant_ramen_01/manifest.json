@@ -4,6 +4,7 @@
   "lines": {
     "greet": "greet.wav",
     "seat": "seat.wav",
+    "noodle_firmness": "noodle_firmness.wav",
     "confirm_order": "confirm_order.wav"
   }
 }

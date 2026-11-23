@@ -1,0 +1,10 @@
+{
+  "scenario_id": "taxi_01",
+  "voice": "qwen3_tts",
+  "lines": {
+    "greet": "greet.wav",
+    "route": "route.wav",
+    "fare": "fare.wav",
+    "pay": "pay.wav"
+  }
+}

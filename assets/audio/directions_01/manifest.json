@@ -1,0 +1,10 @@
+{
+  "scenario_id": "directions_01",
+  "voice": "qwen3_tts",
+  "lines": {
+    "greet": "greet.wav",
+    "right_turn": "right_turn.wav",
+    "left_turn": "left_turn.wav",
+    "pin": "pin.wav"
+  }
+}

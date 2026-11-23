@@ -1,0 +1,10 @@
+{
+  "scenario_id": "train_ticket_01",
+  "voice": "qwen3_tts",
+  "lines": {
+    "greet": "greet.wav",
+    "fare": "fare.wav",
+    "pay": "pay.wav",
+    "platform": "platform.wav"
+  }
+}

@@ -106,10 +106,7 @@ services:
 
   tts:
     <<: *gpu
-    build:
-      context: ./tts
-      args:
-        BASE: ${GPU_BASE:-nvcr.io/nvidia/pytorch:25.01-py3}
+    build: ./tts
     profiles: [spark, rtx3090]
     environment:
       # Same map the orchestrator resolves. See docs/ADR-001-speech-placement.md.
